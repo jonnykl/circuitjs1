@@ -7,7 +7,7 @@
 We use a parameter called "beta" to describe the behavior of a MOSFET.  The default value is small (20m), which is appropriate for a signal MOSFET.  To simulate
 a power MOSFET, use a larger value like 80.
 <p>
-In the saturation region, I<sub>ds</sub> = beta * (V<sub>gs</sub> - V<sub>t</sub>)<sup>2</sup>/2.
+In the saturation region, I<sub>ds</sub> = beta * (V<sub>gs</sub> - V<sub>t</sub>)<sup>2</sup>/2 * (1 + lambda*V<sub>ds</sub>).
 <p>
 This worksheet will calculate the value of beta for a particular MOSFET, given Rds(on).
 <p>
