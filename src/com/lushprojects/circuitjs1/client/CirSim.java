@@ -1249,6 +1249,7 @@ MouseOutHandler, MouseWheelHandler {
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Sequence generator"), "SeqGenElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Adder"), "AdderElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Half Adder"), "HalfAdderElm"));
+    	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Full Adder"), "FullAdderElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Custom Logic"), "UserDefinedLogicElm")); // don't change this, it will break people's saved shortcuts
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Static RAM"), "SRAMElm"));
     	mainMenuBar.addItem(SafeHtmlUtils.fromTrustedString(CheckboxMenuItem.checkBoxHtml+Locale.LS("&nbsp;</div>Digital Chips")), chipMenuBar);
@@ -5921,6 +5922,7 @@ MouseOutHandler, MouseWheelHandler {
     	case 214: return new CCVSElm(x1, y1, x2, y2, f, st);
     	case 215: return new CCCSElm(x1, y1, x2, y2, f, st);
     	case 216: return new OhmMeterElm(x1, y1, x2, y2, f, st);
+    	case 240: return new FullAdderElm(x1, y1, x2, y2, f, st);
 	case 350: return new ThermistorNTCElm(x1, y1, x2, y2, f, st);
     	case 368: return new TestPointElm(x1, y1, x2, y2, f, st);
     	case 370: return new AmmeterElm(x1, y1, x2, y2, f, st);
@@ -6145,6 +6147,8 @@ MouseOutHandler, MouseWheelHandler {
     		return (CircuitElm) new AdderElm(x1, y1);
     	if (n=="HalfAdderElm")
     		return (CircuitElm) new HalfAdderElm(x1, y1);
+    	if (n=="FullAdderElm")
+    		return (CircuitElm) new FullAdderElm(x1, y1);
     	if (n=="MonostableElm")
     		return (CircuitElm) new MonostableElm(x1, y1);
     	if (n=="LabeledNodeElm")
