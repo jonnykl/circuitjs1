@@ -19,14 +19,14 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class FullAdderElm extends ChipElm {
-	public FullAdderElm(int xx, int yy) {
+    class AdderElm extends ChipElm {
+	public AdderElm(int xx, int yy) {
 	    super(xx, yy);
 	    flags |= FLAG_BITS;
 	    bits = 4;
 	    setupPins();
 	}
-	public FullAdderElm(int xa, int ya, int xb, int yb, int f,
+	public AdderElm(int xa, int ya, int xb, int yb, int f,
 			    StringTokenizer st) {
 	    super(xa, ya, xb, yb, f, st);
 	    if (!needsBits())

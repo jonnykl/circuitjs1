@@ -1247,7 +1247,7 @@ MouseOutHandler, MouseWheelHandler {
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Ring Counter"), "DecadeElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Latch"), "LatchElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Sequence generator"), "SeqGenElm"));
-    	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Adder"), "FullAdderElm"));
+    	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Adder"), "AdderElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Half Adder"), "HalfAdderElm"));
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Custom Logic"), "UserDefinedLogicElm")); // don't change this, it will break people's saved shortcuts
     	chipMenuBar.addItem(getClassCheckItem(Locale.LS("Add Static RAM"), "SRAMElm"));
@@ -5905,7 +5905,7 @@ MouseOutHandler, MouseWheelHandler {
     	case 193: return new TFlipFlopElm(x1, y1, x2, y2, f, st);
     	case 194: return new MonostableElm(x1, y1, x2, y2, f, st);
     	case 195: return new HalfAdderElm(x1, y1, x2, y2, f, st);
-    	case 196: return new FullAdderElm(x1, y1, x2, y2, f, st);
+    	case 196: return new AdderElm(x1, y1, x2, y2, f, st);
     	case 197: return new SevenSegDecoderElm(x1, y1, x2, y2, f, st);
     	case 200: return new AMElm(x1, y1, x2, y2, f, st);
     	case 201: return new FMElm(x1, y1, x2, y2, f, st);
@@ -6141,8 +6141,8 @@ MouseOutHandler, MouseWheelHandler {
     		return (CircuitElm) new TFlipFlopElm(x1, y1);
     	if (n=="SevenSegDecoderElm")
     		return (CircuitElm) new SevenSegDecoderElm(x1, y1);
-    	if (n=="FullAdderElm")
-    		return (CircuitElm) new FullAdderElm(x1, y1);
+    	if (n=="AdderElm")
+    		return (CircuitElm) new AdderElm(x1, y1);
     	if (n=="HalfAdderElm")
     		return (CircuitElm) new HalfAdderElm(x1, y1);
     	if (n=="MonostableElm")
