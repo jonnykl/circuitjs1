@@ -416,7 +416,7 @@ public class Menus {
 		"Add Ring Counter", "DecadeElm",
 		"Add Latch/Register", "LatchElm",
 		"Add Sequence generator", "SeqGenElm",
-		"Add Adder", "FullAdderElm",
+		"Add Adder", "AdderElm",
 		"Add Half Adder", "HalfAdderElm",
 		"Add Custom Logic", "UserDefinedLogicElm", // don't change this, it will break people's saved shortcuts
 		"Add Static RAM", "SRAMElm",
