@@ -1,0 +1,11 @@
+
+Development:
+- ./dev.sh setup
+- ./dev.sh compile
+- cd war && python -m http.server
+
+Deploy:
+- cd war
+- rm -rf WEB-INF update-service-worker.sh shortrelay.php service-worker.orig
+- mv circuitjs.html index.html
+
