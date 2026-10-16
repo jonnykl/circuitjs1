@@ -1,6 +1,6 @@
-/*
+/*    
     Copyright (C) Paul Falstad and Iain Sharp
-
+    
     This file is part of CircuitJS1.
 
     CircuitJS1 is free software: you can redistribute it and/or modify
@@ -19,44 +19,77 @@
 
 package com.lushprojects.circuitjs1.client;
 
-class FullAdderElm extends ChipElm {
-        boolean hasReset() {return false;}
-        public FullAdderElm(int xx, int yy) { super(xx, yy); }
-        public FullAdderElm(int xa, int ya, int xb, int yb, int f,
-                            StringTokenizer st) {
-            super(xa, ya, xb, yb, f, st);
+    class FullAdderElm extends ChipElm {
+	public FullAdderElm(int xx, int yy) {
+	    super(xx, yy);
+	    flags |= FLAG_BITS;
+	    bits = 4;
+	    setupPins();
+	}
+	public FullAdderElm(int xa, int ya, int xb, int yb, int f,
+			    StringTokenizer st) {
+	    super(xa, ya, xb, yb, f, st);
+	    if (!needsBits())
+		bits = 1;
+	    setupPins();
+	}
+	static final int FLAG_BITS = 2;
+	
+	String getChipName() { return "Adder"; }
+	int carryIn, carryOut;
+
+	void setupPins() {
+	    sizeX=2;
+	    sizeY=bits*2+1;
+	    pins=new Pin[getPostCount()];
+
+	    int i;
+	    for (i = 0; i != bits; i++) {
+		pins[i       ] = new Pin(bits-1-i, SIDE_W, "A" + i);
+		pins[i+bits  ] = new Pin(bits-1-i+bits, SIDE_W, "B" + i);
+		pins[i+bits*2] = new Pin(bits-1-i+2, SIDE_E, "S" + i);
+		pins[i+bits*2].output=true;
+	    }
+	    carryIn = bits*3;
+	    carryOut = bits*3+1;
+	    pins[carryOut] = new Pin(0, SIDE_E, "C");
+	    pins[carryOut].output=true;
+	    pins[carryIn] = new Pin(bits*2, SIDE_W, "Cin");
+	    allocNodes();
+	}
+	int getPostCount() {
+	    return bits*3+2;
+	}
+	int getVoltageSourceCount() { return bits+1; }
+
+	void execute() {
+	    int i;
+	    int c = pins[carryIn].value ? 1 : 0;
+	    for (i = 0; i != bits; i++) {
+		int v = (pins[i].value ? 1 : 0) + (pins[i+bits].value ? 1 : 0) + c;
+		c = (v > 1) ? 1 : 0;
+		writeOutput(i+bits*2, ((v & 1) == 1));
+	    }
+	    writeOutput(carryOut, (c == 1));
+	}
+	int getDumpType() { return 196; }
+	boolean needsBits() { return (flags & FLAG_BITS) != 0; }
+
+        public EditInfo getChipEditInfo(int n) {
+            if (n == 0)
+                return new EditInfo("# of Bits", bits, 1, 1).setDimensionless();
+            return super.getChipEditInfo(n);
         }
-        String getChipName() { return "Full Adder"; }
-
-        void setupPins() {
-            sizeX=2;
-            sizeY=3;
-            pins=new Pin[getPostCount()];
-
-            pins[0] = new Pin(0, SIDE_E, "S");
-            pins[0].output=true;
-            pins[1] = new Pin(1, SIDE_E, "C");
-            pins[1].output=true;
-            pins[2] = new Pin(0, SIDE_W, "A");
-            pins[3] = new Pin(1, SIDE_W, "B");
-            pins[4] = new Pin(2, SIDE_W, "C");
-
+        public void setChipEditValue(int n, EditInfo ei) {
+            if (n == 0 && ei.value > 0) {
+                bits = (int)ei.value;
+                flags |= FLAG_BITS;
+                setupPins();
+                setPoints();
+                allocNodes();
+                return;
+            }
+            super.setChipEditValue(n, ei);
         }
-        int getPostCount() {
-            return 5;
-        }
-        int getVoltageSourceCount() {return 2;}
 
-        void execute() {
-            int a = pins[2].value ? 1 : 0;
-            int b = pins[3].value ? 1 : 0;
-            int c = pins[4].value ? 1 : 0;
-
-            int sum = (a+b+c) & 1;
-            int carry = ((a+b+c) >> 1) & 1;
-
-            pins[0].value = (sum != 0);
-            pins[1].value = (carry != 0);
-        }
-        int getDumpType() { return 240; }
-}
+    }

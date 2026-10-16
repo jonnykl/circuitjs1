@@ -36,13 +36,11 @@ class MosfetElm extends CircuitElm {
 	double vt;
 	// beta = 1/(RdsON*(Vgs-Vt))
 	double beta;
-	double lambda;
 	static int globalFlags;
 	Diode diodeB1, diodeB2;
 	double diodeCurrent1, diodeCurrent2, bodyCurrent;
 	double curcount_body1, curcount_body2;
 	static double lastBeta;
-	static double lastLambda;
 	
 	MosfetElm(int xx, int yy, boolean pnpflag) {
 	    super(xx, yy);
@@ -52,7 +50,6 @@ class MosfetElm extends CircuitElm {
 	    noDiagonal = true;
 	    setupDiodes();
 	    beta = getDefaultBeta();
-	    lambda = getDefaultLambda();
 	    vt = getDefaultThreshold();
 	}
 	
@@ -64,11 +61,9 @@ class MosfetElm extends CircuitElm {
 	    setupDiodes();
 	    vt = getDefaultThreshold();
 	    beta = getBackwardCompatibilityBeta();
-	    lambda = getDefaultLambda();
 	    try {
 		vt = new Double(st.nextToken()).doubleValue();
 		beta = new Double(st.nextToken()).doubleValue();
-		lambda = new Double(st.nextToken()).doubleValue();
 	    } catch (Exception e) {}
 	    globalFlags = flags & (FLAGS_GLOBAL);
 	    allocNodes(); // make sure volts[] has the right number of elements when hasBodyTerminal() is true 
@@ -92,10 +87,6 @@ class MosfetElm extends CircuitElm {
 	// default for elements in old files with no configurable beta.  JfetElm overrides this.
 	// Not sure where this value came from, but the ZVP3306A has a beta of about .027.  Power MOSFETs have much higher betas (like 80 or more)
 	double getBackwardCompatibilityBeta() { return .02; }
-
-	// default lambda for new elements
-	double getDefaultLambda() { return lastLambda == 0 ? getBackwardCompatibilityLambda() : lastLambda; }
-	double getBackwardCompatibilityLambda() { return .02; }
 	
 	boolean nonLinear() { return true; }
 	boolean drawDigital() { return (flags & FLAG_DIGITAL) != 0; }
@@ -111,7 +102,7 @@ class MosfetElm extends CircuitElm {
 		volts[bodyTerminal] = 0;
 	}
 	String dump() {
-	    return super.dump() + " " + vt + " " + beta + " " + lambda;
+	    return super.dump() + " " + vt + " " + beta;
 	}
 	int getDumpType() { return 'f'; }
 	final int hs = 16;
@@ -400,15 +391,16 @@ class MosfetElm extends CircuitElm {
 		mode = 0;
 	    } else if (vds < vgs-vt) {
 		// linear
-		ids = beta*((vgs-vt)*vds - vds*vds*.5)*(1 + lambda*vds);
+		ids = beta*((vgs-vt)*vds - vds*vds*.5);
 		gm  = beta*vds;
-		Gds = beta*((vgs-vds-vt) + lambda*(2*(vgs-vt)*vds - 1.5*vds*vds));
+		Gds = beta*(vgs-vds-vt);
 		mode = 1;
 	    } else {
-		// saturation
+		// saturation; Gds = 0
 		gm  = beta*(vgs-vt);
-		Gds = .5*beta*(vgs-vt)*(vgs-vt)*lambda;
-		ids = .5*beta*(vgs-vt)*(vgs-vt)*(1 + lambda*vds);
+		// use very small Gds to avoid nonconvergence
+		Gds = 1e-8;
+		ids = .5*beta*(vgs-vt)*(vgs-vt) + (vds-(vgs-vt))*Gds;
 		mode = 2;
 	    }
 	    
@@ -446,7 +438,7 @@ class MosfetElm extends CircuitElm {
 	void getFetInfo(String arr[], String n) {
 	    arr[0] = Locale.LS(((pnp == -1) ? "p-" : "n-") + n);
 	    arr[0] += " (Vt=" + getVoltageText(pnp*vt);
-	    arr[0] += ", \u03b2=" + beta + ", \u03bb=" + lambda + ")";
+	    arr[0] += ", \u03b2=" + beta + ")";
 	    arr[1] = ((pnp == 1) ? "Ids = " : "Isd = ") + getCurrentText(ids);
 	    arr[2] = "Vgs = " + getVoltageText(volts[0]-volts[pnp == -1 ? 2 : 1]);
 	    arr[3] = ((pnp == 1) ? "Vds = " : "Vsd = ") + getVoltageText(volts[2]-volts[1]);
@@ -473,29 +465,27 @@ class MosfetElm extends CircuitElm {
 			return new EditInfo("Threshold Voltage", pnp*vt, .01, 5);
 		if (n == 1)
 			return new EditInfo(EditInfo.makeLink("mosfet-beta.html", "Beta"), beta, .01, 5);
-		if (n == 2)
-			return new EditInfo("Lambda", lambda, 0.001, 1);
-		if (n == 3) {
+		if (n == 2) {
 			EditInfo ei = new EditInfo("", 0, -1, -1);
 			ei.checkbox = new Checkbox("Show Bulk", showBulk());
 			return ei;
 		}
-		if (n == 4) {
+		if (n == 3) {
 			EditInfo ei = new EditInfo("", 0, -1, -1);
 			ei.checkbox = new Checkbox("Swap D/S", (flags & FLAG_FLIP) != 0);
 			return ei;
 		}
-		if (n == 5 && !showBulk()) {
+		if (n == 4 && !showBulk()) {
 			EditInfo ei = new EditInfo("", 0, -1, -1);
 			ei.checkbox = new Checkbox("Digital Symbol", drawDigital());
 			return ei;
 		}
-		if (n == 5 && showBulk()) {
+		if (n == 4 && showBulk()) {
 			EditInfo ei = new EditInfo("", 0, -1, -1);
 			ei.checkbox = new Checkbox("Simulate Body Diode", (flags & FLAG_BODY_DIODE) != 0);
 			return ei;
 		}
-		if (n == 6 && doBodyDiode()) {
+		if (n == 5 && doBodyDiode()) {
 			EditInfo ei = new EditInfo("", 0, -1, -1);
 			ei.checkbox = new Checkbox("Body Terminal", (flags & FLAG_BODY_TERMINAL) != 0);
 			return ei;
@@ -508,29 +498,27 @@ class MosfetElm extends CircuitElm {
 			vt = pnp*ei.value;
 		if (n == 1 && ei.value > 0)
 			beta = lastBeta = ei.value;	
-		if (n == 2 && ei.value > 0)
-			lambda = lastLambda = ei.value;
-		if (n == 3) {
+		if (n == 2) {
 		    globalFlags = (!ei.checkbox.getState()) ? (globalFlags|FLAG_HIDE_BULK) :
 				(globalFlags & ~(FLAG_HIDE_BULK|FLAG_DIGITAL));
 //		    setPoints();
 		    ei.newDialog = true;
 		}
-		if (n == 4) {
+		if (n == 3) {
 			flags = (ei.checkbox.getState()) ? (flags | FLAG_FLIP) :
 				(flags & ~FLAG_FLIP);
 //			setPoints();
 		}
-		if (n == 5 && !showBulk()) {
+		if (n == 4 && !showBulk()) {
 		    globalFlags = (ei.checkbox.getState()) ? (globalFlags|FLAG_DIGITAL) :
 				(globalFlags & ~FLAG_DIGITAL);
 //		    setPoints();
 		}
-		if (n == 5 && showBulk()) {
+		if (n == 4 && showBulk()) {
 		    flags = ei.changeFlag(flags, FLAG_BODY_DIODE);
 		    ei.newDialog = true;
 		}
-		if (n == 6) {
+		if (n == 5) {
 		    flags = ei.changeFlag(flags, FLAG_BODY_TERMINAL);
 		}
 
