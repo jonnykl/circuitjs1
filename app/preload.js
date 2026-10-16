@@ -1,12 +1,11 @@
-const { remote, dialog } = require('electron');
+const { ipcRenderer } = require('electron');
 const fs = require('fs');
-
-let currWindow = remote.BrowserWindow.getFocusedWindow();
 
 var lastSavedFilePath = null;
 
-window.showSaveDialog = function () { return remote.dialog.showSaveDialog(null); } 
-window.saveFile = function (file, text) {
+window.showSaveDialog = function (defaultPath) { return ipcRenderer.invoke('show-save-dialog', defaultPath); }
+
+window.saveFile = function (file, data, encoding) {
   var path;
   if (!file)
     path = lastSavedFilePath;
@@ -14,15 +13,15 @@ window.saveFile = function (file, text) {
     path = file.filePath.toString();
     lastSavedFilePath = path;
   }
-  fs.writeFile(path, text, function (err) { if (err) window.alert(err); });
+  fs.writeFile(path, data, { encoding: encoding || 'utf8' }, function (err) { if (err) window.alert(err); });
 }
 
 window.openFile = function (callback) {
-  remote.dialog.showOpenDialog({ properties: ['openFile']}).then(function(result) {
-    if (result == undefined) return;
+  ipcRenderer.invoke('show-open-dialog').then(function(result) {
+    if (!result || result.canceled || result.filePaths.length == 0) return;
     var fileName = result.filePaths[0];
     fs.readFile(fileName, 'utf-8', function (err, data) {
-      if (err) { if (err) window.alert(err); return; }
+      if (err) { window.alert(err); return; }
       lastSavedFilePath = fileName;
       var shortName = fileName.substring(fileName.lastIndexOf('/')+1);
       shortName = shortName.substring(shortName.lastIndexOf("\\")+1);
@@ -32,17 +31,26 @@ window.openFile = function (callback) {
 }
 
 window.toggleDevTools = function () {
-  remote.getCurrentWindow().toggleDevTools();
+  ipcRenderer.send('toggle-dev-tools');
 }
 
-const arguments = remote.getGlobal('sharedObject').prop1;
-if (arguments.length > 1) {
-  // arguments[1] gets destroyed somehow
-  var arg1 = arguments[1];
-  fs.readFile(arguments[1], 'utf-8', function (err, data) {
-    if (err) { if (err) window.alert(err); return; }
+window.newWindow = function () {
+  ipcRenderer.send('new-window');
+}
+
+// File to open is passed as ?openFile=... URL param by main.js
+// (from open-file event on Mac, or argv[1] on Windows/Linux)
+const urlParams = new URLSearchParams(window.location.search);
+const fileToOpen = urlParams.get('openFile');
+if (fileToOpen) {
+  var arg1 = fileToOpen;
+  var shortName = arg1.substring(arg1.lastIndexOf('/')+1);
+  shortName = shortName.substring(shortName.lastIndexOf("\\")+1);
+  window.startCircuitFileName = shortName;
+  try {
+    window.startCircuitText = fs.readFileSync(fileToOpen, 'utf-8');
     lastSavedFilePath = arg1;
-    window.startCircuitText = data;
-  });
+  } catch(err) {
+    window.alert(err);
+  }
 }
-

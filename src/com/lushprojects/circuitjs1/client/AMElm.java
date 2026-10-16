@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 // contributed by Edward Calver
 
 class AMElm extends CircuitElm {
@@ -43,8 +46,19 @@ class AMElm extends CircuitElm {
 	reset();
     }
     int getDumpType() { return 200; }
-    String dump() {
-	return super.dump() + " " +carrierfreq+" " + signalfreq + " " +maxVoltage;
+
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "cf", carrierfreq);
+	XMLSerializer.dumpAttr(elem, "sf", signalfreq);
+	XMLSerializer.dumpAttr(elem, "mv", maxVoltage);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	carrierfreq = xml.parseDoubleAttr("cf", carrierfreq);
+	signalfreq = xml.parseDoubleAttr("sf", signalfreq);
+	maxVoltage = xml.parseDoubleAttr("mv", maxVoltage);
+	reset();
     }
     /*void setCurrent(double c) {
       current = c;
@@ -58,10 +72,10 @@ class AMElm extends CircuitElm {
       int getPostCount() { return 1; }
 	
      void stamp() {
-	    sim.stampVoltageSource(0, nodes[0], voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[0], voltSource);
     }
     void doStep() {
-	    sim.updateVoltageSource(0, nodes[0], voltSource, getVoltage());
+	    sim.updateVoltageSource(CircuitNode.ground, nodes[0], voltSource, getVoltage());
     }
     double getVoltage() {
 	double w = 2*pi*(sim.t-freqTimeZero);
@@ -84,7 +98,7 @@ class AMElm extends CircuitElm {
 	    drawWaveform(g, point2);
 	drawPosts(g);
 	curcount = updateDotCount(-current, curcount);
-	if (sim.dragElm != this)
+	if (!isCreating())
 	    drawDots(g, point1, lead1, curcount);
     }
 	
@@ -106,6 +120,7 @@ class AMElm extends CircuitElm {
     
     double getVoltageDiff() { return volts[0]; }
    
+    boolean validate() { return validateRailNode(0); }
     boolean hasGroundConnection(int n1) { return true; }
 	
     int getVoltageSourceCount() {
@@ -124,7 +139,7 @@ class AMElm extends CircuitElm {
     }
     public EditInfo getEditInfo(int n) {
 	if (n == 0)
-	    return new EditInfo("Max Voltage", maxVoltage, -20, 20);
+	    return new EditInfo("Max Voltage", maxVoltage, -20, 20).setUnitStep();
 	if (n == 1)
 	    return new EditInfo("Carrier Frequency (Hz)", carrierfreq, 4, 500);
 	if (n == 2)

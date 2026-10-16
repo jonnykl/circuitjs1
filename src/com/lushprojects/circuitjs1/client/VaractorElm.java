@@ -1,5 +1,8 @@
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 class VaractorElm extends DiodeElm {
     double baseCapacitance;
     
@@ -14,6 +17,7 @@ class VaractorElm extends DiodeElm {
 	baseCapacitance = new Double(st.nextToken()).doubleValue();
     }
     int getDumpType() { return 176; }
+    String getElmType() { return "varactor"; }
     void getInfo(String arr[]) {
 	super.getInfo(arr);
 	arr[0] = "varactor";
@@ -38,8 +42,17 @@ class VaractorElm extends DiodeElm {
 	super.reset();
 	capvoltdiff = 0;
     }
-    String dump() {
-	return super.dump() + " " + capvoltdiff + " " + baseCapacitance;
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "ca", capvoltdiff);
+        XMLSerializer.dumpAttr(elem, "ba", baseCapacitance);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        capvoltdiff = xml.parseDoubleAttr("ca", capvoltdiff);
+        baseCapacitance = xml.parseDoubleAttr("ba", baseCapacitance);
     }
     void setPoints() {
 	super.setPoints();
@@ -65,7 +78,7 @@ class VaractorElm extends DiodeElm {
 	setVoltageColor(g, volts[0]);
 	setPowerColor(g, false);
 	drawThickLine(g, plate1[0], plate1[1]);
-	if (sim.powerCheckItem.getState())
+	if (showPower())
 	    g.setColor(Color.gray);
 
 	// draw second plate
@@ -77,6 +90,10 @@ class VaractorElm extends DiodeElm {
 	drawPosts(g);
     }
     
+    void setVoltageSource(int n, VoltageSource v) {
+	super.setVoltageSource(n, v);
+	v.setNodes(nodes[0], nodes[2]);
+    }
     void stamp() {
 	super.stamp();
 	sim.stampVoltageSource(nodes[0], nodes[2], voltSource);
@@ -116,7 +133,7 @@ class VaractorElm extends DiodeElm {
     }
 
     int getShortcut() { return 0; }
-    void setCurrent(int x, double c) { capCurrent = c; }
+    void setCurrent(VoltageSource vs, double c) { capCurrent = c; }
     double voltSourceValue;
     int getVoltageSourceCount() { return 1; }
     int getInternalNodeCount() { return 1; }

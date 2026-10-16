@@ -19,6 +19,10 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.user.client.ui.TextArea;
+
 import java.util.Vector;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
@@ -27,6 +31,8 @@ class TextElm extends GraphicElm {
     String text;
     Vector<String> lines;
     int size;
+    String color;
+    TextArea editTextArea;
 //    final int FLAG_CENTER = 1;
     final int FLAG_BAR = 2;
     final int FLAG_ESCAPE = 4;
@@ -72,11 +78,29 @@ class TextElm extends GraphicElm {
 	}
 	lines.add(sb.toString());
     }
+
     String dump() {
 	flags |= FLAG_ESCAPE;
 	return super.dump() + " " + size + " " + CustomLogicModel.escape(text);
 	//return super.dump() + " " + size + " " + text;
     }
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "si", size);
+        XMLSerializer.dumpAttr(elem, "te", text);
+        if (color != null)
+            XMLSerializer.dumpAttr(elem, "co", color);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        size = xml.parseIntAttr("si", size);
+        text = xml.parseStringAttr("te", text);
+        color = xml.parseStringAttr("co", color);
+	split();
+    }
+
     int getDumpType() { return 'x'; }
     void drag(int xx, int yy) {
 	x = xx;
@@ -89,7 +113,7 @@ class TextElm extends GraphicElm {
 	//g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
 	//	RenderingHints.VALUE_ANTIALIAS_ON);
 	g.save();
-	g.setColor(needsHighlight() ? selectColor : lightGrayColor);
+	g.setColor(needsHighlight() ? selectColor : (color != null ? new Color(color) : lightGrayColor));
 	Font f = new Font("SansSerif", 0, size);
 	g.setFont(f);
 //	FontMetrics fm = g.getFontMetrics();
@@ -123,7 +147,10 @@ class TextElm extends GraphicElm {
     public EditInfo getEditInfo(int n) {
 	if (n == 0) {
 	    EditInfo ei = new EditInfo("Text", 0, -1, -1);
-	    ei.text = text;
+	    ei.textArea = new TextArea();
+	    editTextArea = ei.textArea;
+	    ei.textArea.setVisibleLines(5);
+	    ei.textArea.setText(text.replace("\\n", "\n"));
 	    return ei;
 	}
 	if (n == 1)
@@ -134,11 +161,13 @@ class TextElm extends GraphicElm {
 		new Checkbox("Draw Bar On Top", (flags & FLAG_BAR) != 0);
 	    return ei;
 	}
+	if (n == 3)
+	    return new EditInfo("Color", color != null ? color : lightGrayColor.getHexValue()).setIsColor();
 	return null;
     }
     public void setEditValue(int n, EditInfo ei) {
 	if (n == 0) {
-	    text = ei.textf.getText();
+	    text = editTextArea.getText().replace("\n", "\\n");
 	    split();
 	}
 	if (n == 1)
@@ -149,12 +178,19 @@ class TextElm extends GraphicElm {
 	    else
 		flags &= ~FLAG_BAR;
 	}
+	if (n == 3) {
+	    String c = ei.textf.getText();
+	    color = c.equals(lightGrayColor.getHexValue()) ? null : c;
+	}
     }
 //    boolean isCenteredText() { return (flags & FLAG_CENTER) != 0; }
+    String getElmType() { return "text"; }
     void getInfo(String arr[]) {
 	arr[0] = text;
     }
     @Override
     int getShortcut() { return 't'; }
+
+    boolean canViewInScope() { return false; }
 }
 

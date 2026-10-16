@@ -19,8 +19,12 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class TransformerElm extends CircuitElm {
+    import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class TransformerElm extends CircuitElm {
 	double inductance, ratio, couplingCoef;
+	double saturationCurrent; // 0 = disabled (linear core)
 	Point ptEnds[], ptCoil[], ptCore[];
 	double current[], curcount[];
 	Point dots[];
@@ -55,13 +59,14 @@ package com.lushprojects.circuitjs1.client;
 	    couplingCoef = .999;
 	    try {
 		couplingCoef = new Double(st.nextToken()).doubleValue();
+		saturationCurrent = new Double(st.nextToken()).doubleValue();
 	    } catch (Exception e) { }
 	    noDiagonal = true;
-	    polarity = (hasFlag(FLAG_REVERSE)) ? -1 : 1; 
+	    polarity = (hasFlag(FLAG_REVERSE)) ? -1 : 1;
 	}
 	void drag(int xx, int yy) {
-	    xx = sim.snapGrid(xx);
-	    yy = sim.snapGrid(yy);
+	    xx = snapGrid(xx);
+	    yy = snapGrid(yy);
 	    if (abs(xx-x) > abs(yy-y)) {
 		flags &= ~FLAG_VERTICAL;
 	    } else
@@ -76,10 +81,41 @@ package com.lushprojects.circuitjs1.client;
 	    setPoints();
 	}
 	int getDumpType() { return 'T'; }
-	String dump() {
-	    return super.dump() + " " + inductance + " " + ratio + " " +
-		current[0] + " " + current[1] + " " + couplingCoef;
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "in", inductance);
+	    XMLSerializer.dumpAttr(elem, "ra", ratio);
+	    XMLSerializer.dumpAttr(elem, "co", couplingCoef);
+	    XMLSerializer.dumpAttr(elem, "wi", width);
+	    if (saturationCurrent != 0)
+		XMLSerializer.dumpAttr(elem, "isat", saturationCurrent);
 	}
+
+	void dumpXmlState(Document doc, Element elem) {
+	    XMLSerializer.dumpAttr(elem, "c0", current[0]);
+	    XMLSerializer.dumpAttr(elem, "c1", current[1]);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+
+	    if (hasFlag(FLAG_VERTICAL))
+		width = -max(32, abs(x2-x));
+	    else
+		width = max(32, abs(y2-y));
+
+	    inductance = xml.parseDoubleAttr("in", inductance);
+	    ratio = xml.parseDoubleAttr("ra", ratio);
+	    couplingCoef = xml.parseDoubleAttr("co", couplingCoef);
+	    width = xml.parseIntAttr("wi", width);
+	    saturationCurrent = xml.parseDoubleAttr("isat", saturationCurrent);
+	    current[0] = xml.parseDoubleAttr("c0", 0);
+	    current[1] = xml.parseDoubleAttr("c1", 0);
+	    polarity = (hasFlag(FLAG_REVERSE)) ? -1 : 1;
+	}
+
+	boolean nonLinear() { return saturationCurrent > 0; }
 	boolean isTrapezoidal() { return (flags & Inductor.FLAG_BACK_EULER) == 0; }
 	void draw(Graphics g) {
 	    int i;
@@ -156,6 +192,23 @@ package com.lushprojects.circuitjs1.client;
 	    current[0] = current[1] = volts[0] = volts[1] = volts[2] =
 		volts[3] = curcount[0] = curcount[1] = curSourceValue1 = curSourceValue2 = 0;
 	}
+	// compute effective inductance with saturation: L(I) = L0 / (1 + (I/Isat)^2)
+	double calcEffectiveInductance(double l0, double i, double isat) {
+	    if (isat <= 0) return l0;
+	    double ratio = i / isat;
+	    return l0 / (1 + ratio * ratio);
+	}
+
+	// compute a1-a4 companion model coefficients from effective inductances
+	void computeCoefficients(double l1, double l2, double m) {
+	    double deti = 1/(l1*l2-m*m);
+	    double ts = isTrapezoidal() ? sim.timeStep/2 : sim.timeStep;
+	    a1 = l2*deti*ts;
+	    a2 = -m*deti*ts;
+	    a3 = -m*deti*ts;
+	    a4 = l1*deti*ts;
+	}
+
 	double a1, a2, a3, a4;
 	void stamp() {
 	    // equations for transformer:
@@ -188,23 +241,34 @@ package com.lushprojects.circuitjs1.client;
 	    double l1 = inductance;
 	    double l2 = inductance*ratio*ratio;
 	    double m = couplingCoef*Math.sqrt(l1*l2);
-	    // build inverted matrix
-	    double deti = 1/(l1*l2-m*m);
-	    double ts = isTrapezoidal() ? sim.timeStep/2 : sim.timeStep;
-	    a1 = l2*deti*ts; // we multiply dt/2 into a1..a4 here
-	    a2 = -m*deti*ts;
-	    a3 = -m*deti*ts;
-	    a4 = l1*deti*ts;
-	    sim.stampConductance(nodes[0], nodes[2], a1);
-	    sim.stampVCCurrentSource(nodes[0], nodes[2], nodes[1], nodes[3], a2);
-	    sim.stampVCCurrentSource(nodes[1], nodes[3], nodes[0], nodes[2], a3);
-	    sim.stampConductance(nodes[1], nodes[3], a4);
+	    computeCoefficients(l1, l2, m);
+	    if (saturationCurrent > 0) {
+		// nonlinear: conductances will be stamped in doStep()
+		sim.stampNonLinear(nodes[0]);
+		sim.stampNonLinear(nodes[1]);
+		sim.stampNonLinear(nodes[2]);
+		sim.stampNonLinear(nodes[3]);
+	    } else {
+		// linear: stamp fixed conductances and VCCSes
+		sim.stampConductance(nodes[0], nodes[2], a1);
+		sim.stampVCCurrentSource(nodes[0], nodes[2], nodes[1], nodes[3], a2);
+		sim.stampVCCurrentSource(nodes[1], nodes[3], nodes[0], nodes[2], a3);
+		sim.stampConductance(nodes[1], nodes[3], a4);
+	    }
 	    sim.stampRightSide(nodes[0]);
 	    sim.stampRightSide(nodes[1]);
 	    sim.stampRightSide(nodes[2]);
 	    sim.stampRightSide(nodes[3]);
 	}
 	void startIteration() {
+	    if (saturationCurrent > 0) {
+		// recompute coefficients with current-dependent inductances
+		double l1 = calcEffectiveInductance(inductance, current[0], saturationCurrent);
+		double l2 = calcEffectiveInductance(inductance*ratio*ratio, current[1],
+			saturationCurrent*ratio);
+		double m = couplingCoef*Math.sqrt(l1*l2);
+		computeCoefficients(l1, l2, m);
+	    }
 	    double voltdiff1 = volts[0]-volts[2];
 	    double voltdiff2 = volts[1]-volts[3];
 	    if (isTrapezoidal()) {
@@ -213,10 +277,17 @@ package com.lushprojects.circuitjs1.client;
 	    } else {
 		curSourceValue1 = current[0];
 		curSourceValue2 = current[1];
-	    } 
+	    }
 	}
 	double curSourceValue1, curSourceValue2;
 	void doStep() {
+	    if (saturationCurrent > 0) {
+		// stamp conductances and VCCSes (matrix was restored to origMatrix)
+		sim.stampConductance(nodes[0], nodes[2], a1);
+		sim.stampVCCurrentSource(nodes[0], nodes[2], nodes[1], nodes[3], a2);
+		sim.stampVCCurrentSource(nodes[1], nodes[3], nodes[0], nodes[2], a3);
+		sim.stampConductance(nodes[1], nodes[3], a4);
+	    }
 	    sim.stampCurrentSource(nodes[0], nodes[2], curSourceValue1);
 	    sim.stampCurrentSource(nodes[1], nodes[3], curSourceValue2);
  	}
@@ -232,13 +303,17 @@ package com.lushprojects.circuitjs1.client;
 	    return current[n-2];
 	}
 	void getInfo(String arr[]) {
-	    arr[0] = "transformer";
+	    arr[0] = (saturationCurrent > 0) ? "transformer (sat)" : "transformer";
 	    arr[1] = "L = " + getUnitText(inductance, "H");
 	    arr[2] = "Ratio = 1:" + ratio;
 	    arr[3] = "Vd1 = " + getVoltageText(volts[0]-volts[2]);
 	    arr[4] = "Vd2 = " + getVoltageText(volts[1]-volts[3]);
 	    arr[5] = "I1 = " + getCurrentText(current[0]);
 	    arr[6] = "I2 = " + getCurrentText(current[1]);
+	    if (saturationCurrent > 0) {
+		double l1Eff = calcEffectiveInductance(inductance, current[0], saturationCurrent);
+		arr[7] = "L1eff = " + getUnitText(l1Eff, "H");
+	    }
 	}
 	boolean getConnection(int n1, int n2) {
 	    if (comparePair(n1, n2, 0, 2))
@@ -247,14 +322,16 @@ package com.lushprojects.circuitjs1.client;
 		return true;
 	    return false;
 	}
+	// VCCS stamps couple all nodes, so they must all be in the same matrix
+	boolean getMatrixConnection(int n1, int n2) { return true; }
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo("Primary Inductance (H)", inductance, .01, 5);
+		return new EditInfo("Primary Inductance (H)", inductance, .01, 5).setPositive();
 	    if (n == 1)
-		return new EditInfo("Ratio (N1/N2)", 1/ratio, 1, 10).setDimensionless();
+		return new EditInfo("Ratio (N1/N2)", 1/ratio, 1, 10).setDimensionless().setPositive();
 	    if (n == 2)
 		return new EditInfo("Coupling Coefficient", couplingCoef, 0, 1).
-		    setDimensionless();
+		    setDimensionless().setPositive();
 	    if (n == 3) {
 		EditInfo ei = new EditInfo("", 0, -1, -1);
 		ei.checkbox = new Checkbox("Trapezoidal Approximation",
@@ -267,6 +344,8 @@ package com.lushprojects.circuitjs1.client;
 					   polarity == -1);
 		return ei;
 	    }
+	    if (n == 5)
+		return new EditInfo("Saturation Current (A) (0=none)", saturationCurrent);
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
@@ -274,8 +353,12 @@ package com.lushprojects.circuitjs1.client;
 		inductance = ei.value;
 	    if (n == 1 && ei.value > 0)
 		ratio = 1/ei.value;
-	    if (n == 2 && ei.value > 0 && ei.value < 1)
-		couplingCoef = ei.value;
+	    if (n == 2) {
+		if (ei.value > 0 && ei.value < 1)
+		    couplingCoef = ei.value;
+		else
+		    ei.setError("must be > 0 and < 1");
+	    }
 	    if (n == 3) {
 		if (ei.checkbox.getState())
 		    flags &= ~Inductor.FLAG_BACK_EULER;
@@ -289,6 +372,12 @@ package com.lushprojects.circuitjs1.client;
 		else
 		    flags &= ~FLAG_REVERSE;
 		setPoints();
+	    }
+	    if (n == 5) {
+		if (ei.value >= 0)
+		    saturationCurrent = ei.value;
+		else
+		    ei.setError("must be >= 0");
 	    }
 	}
 	int getShortcut() { return 'T'; }

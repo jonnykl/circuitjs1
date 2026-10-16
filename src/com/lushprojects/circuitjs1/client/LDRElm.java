@@ -6,6 +6,8 @@ import com.google.gwt.user.client.Command;
 import com.google.gwt.canvas.dom.client.CanvasGradient;
 import com.google.gwt.event.dom.client.MouseWheelEvent;
 import com.google.gwt.event.dom.client.MouseWheelHandler;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 /*Bill Collis - June 2015 */
 
@@ -52,26 +54,37 @@ class LDRElm extends CircuitElm implements Command, MouseWheelHandler {
     int getPostCount() { return 2; }
     int getDumpType() { return 374; } //LDR
 
-    //data for file saving - make sure it matches order of items in file input constructor
-    String dump() { 
-	return super.dump() + " " + position  + " " + CustomLogicModel.escape(sliderText); 
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "ps", position);
+	XMLSerializer.dumpAttr(elem, "st", sliderText);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	position = xml.parseDoubleAttr("ps", position);
+	sliderText = xml.parseStringAttr("st", sliderText);
+	lux = LuxFromSliderPos();
+	resistance = calcResistance(lux);
+	int value = (int) (position*100);
+	slider.setValue(value);
+	label.setText(sliderText);
     }
 
     void createSlider() {
-	sim.addWidgetToVerticalPanel(label = new Label(sliderText));
+	app.addWidgetToVerticalPanel(label = new Label(sliderText));
 	label.addStyleName("topSpace");
 	int value = (int) (position*100);
-	sim.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101, this, this));
+	app.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101, this, this));
     }
 
     public void execute() {
-	sim.analyzeFlag = true;
+	app.analyzeFlag = true;
 	setPoints();
     }
 
     void delete() {
-	sim.removeWidgetFromVerticalPanel(label);
-	sim.removeWidgetFromVerticalPanel(slider);
+	app.removeWidgetFromVerticalPanel(label);
+	app.removeWidgetFromVerticalPanel(slider);
     }
     Point ps3, ps4;   
 
@@ -104,7 +117,7 @@ class LDRElm extends CircuitElm implements Command, MouseWheelHandler {
 	grad.addColorStop(0, getVoltageColor(g,v1).getHexValue());
 	grad.addColorStop(1.0, getVoltageColor(g,v2).getHexValue());
 	g.context.setStrokeStyle(grad);
-	if (!sim.euroResistorCheckItem.getState()) {
+	if (!showEuroResistors()) {
 	    g.context.beginPath();
 	    g.context.moveTo(0,0);
 	    for (i=0;i<4;i++){
@@ -135,7 +148,7 @@ class LDRElm extends CircuitElm implements Command, MouseWheelHandler {
 
 
 	g.context.restore();
-	if (sim.showValuesCheckItem.getState()) {
+	if (showValues()) {
 	    lux = LuxFromSliderPos();
 	    resistance = calcResistance(lux);
 	    String s = getShortUnitText(resistance, "");
@@ -174,7 +187,7 @@ class LDRElm extends CircuitElm implements Command, MouseWheelHandler {
 	if (n == 0) {
 	    sliderText = ei.textf.getText();
 	    label.setText(sliderText);
-	    sim.setiFrameHeight();
+	    app.setiFrameHeight();
 	}
 	lux = LuxFromSliderPos();
 	resistance = calcResistance(lux); 

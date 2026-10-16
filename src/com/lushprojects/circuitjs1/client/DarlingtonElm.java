@@ -2,10 +2,10 @@ package com.lushprojects.circuitjs1.client;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
 
-// Test element to evaluate if constructing compound elements from individual transistors is feasible
-
 // Iain Sharp, Feb 2017
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 public class DarlingtonElm extends CompositeElm {
 
@@ -47,7 +47,20 @@ public class DarlingtonElm extends CompositeElm {
 	return super.dump()+" "+pnp;
     }
 
+    String getXmlDumpType() { return "dar"; }
     
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "pnp", pnp);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	pnp = xml.parseIntAttr("pnp", pnp);
+	((TransistorElm) compElmList.get(0)).pnp=pnp;
+	((TransistorElm) compElmList.get(1)).pnp=pnp;
+    }
+
     void draw(Graphics g) {
 	setBbox(point1, point2, 16);
 	setPowerColor(g, true);
@@ -64,7 +77,7 @@ public class DarlingtonElm extends CompositeElm {
 	g.fillPolygon(arrowPoly);
 	// draw base
 	setVoltageColor(g, volts[0]);
-	if (sim.powerCheckItem.getState())
+	if (showPower())
 	    g.setColor(Color.gray);
 	drawThickLine(g, point1, base);
 	// draw dots
@@ -79,7 +92,7 @@ public class DarlingtonElm extends CompositeElm {
 	setPowerColor(g, true);
 	g.fillPolygon(rectPoly);
 
-	if ((needsHighlight() || sim.dragElm == this) && dy == 0) {
+	if ((needsHighlight() || isCreating()) && dy == 0) {
 	    g.setColor(whiteColor);
 	    // IES
 	    // g.setFont(unitsFont);
@@ -97,6 +110,7 @@ public class DarlingtonElm extends CompositeElm {
 
 
 
+    String getElmType() { return "darlington pair"; }
     void getInfo(String arr[]) {
 	arr[0] = Locale.LS("darlington pair") + " (" + ((pnp == -1) ? "PNP)" : "NPN)");
 	double vbc = volts[0] - volts[1];

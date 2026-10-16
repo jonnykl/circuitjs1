@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 // contributed by Edward Calver
 
     class InvertingSchmittElm extends CircuitElm {
@@ -59,11 +62,24 @@ package com.lushprojects.circuitjs1.client;
 	    }
 	}
 
-	String dump() {
-	    return super.dump() + " " + slewRate+" "+lowerTrigger+" "+upperTrigger+" "+logicOnLevel+" "+logicOffLevel;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "slr", slewRate);
+	    XMLSerializer.dumpAttr(elem, "lt", lowerTrigger);
+	    XMLSerializer.dumpAttr(elem, "ut", upperTrigger);
+	    XMLSerializer.dumpAttr(elem, "lon", logicOnLevel);
+	    XMLSerializer.dumpAttr(elem, "loff", logicOffLevel);
 	}
-	
-	int getDumpType() { return 183; }//Trying to find unused type
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    slewRate = xml.parseDoubleAttr("slr", slewRate);
+	    lowerTrigger = xml.parseDoubleAttr("lt", lowerTrigger);
+	    upperTrigger = xml.parseDoubleAttr("ut", upperTrigger);
+	    logicOnLevel = xml.parseDoubleAttr("lon", logicOnLevel);
+	    logicOffLevel = xml.parseDoubleAttr("loff", logicOffLevel);
+	}
+
+	int getDumpType() { return 183; }
 
 	void draw(Graphics g) {
 	    drawPosts(g);
@@ -99,7 +115,7 @@ package com.lushprojects.circuitjs1.client;
 	}
 	int getVoltageSourceCount() { return 1; }
 	void stamp() {
-	    sim.stampVoltageSource(0, nodes[1], voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[1], voltSource);
 	}
 	void doStep() {
 	    double v0 = volts[1];
@@ -131,7 +147,7 @@ package com.lushprojects.circuitjs1.client;
 	    
 	    double maxStep = slewRate * sim.timeStep * 1e9;
 	    out = Math.max(Math.min(v0+maxStep, out), v0-maxStep);
-	    sim.updateVoltageSource(0, nodes[1], voltSource, out);
+	    sim.updateVoltageSource(CircuitNode.ground, nodes[1], voltSource, out);
 	}
 	double getVoltageDiff() { return volts[0]; }
 
@@ -154,9 +170,9 @@ package com.lushprojects.circuitjs1.client;
 	    if (n == 2)
 		return new EditInfo("Slew Rate (V/ns)", slewRate, 0, 0);
 	    if (n == 3)
-		return new EditInfo("High Logic Voltage", logicOnLevel, 0, 0);
+		return new EditInfo("High Logic Voltage", logicOnLevel, 0, 0).setUnitStep();
 	    if (n == 4)
-		return new EditInfo("Low Voltage (V)", logicOffLevel, 0, 0);
+		return new EditInfo("Low Voltage (V)", logicOffLevel, 0, 0).setUnitStep();
 	    
 	    return null;
 	}

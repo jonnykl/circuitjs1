@@ -37,7 +37,7 @@ class RailElm extends VoltageElm {
     final int FLAG_CLOCK = 1;
     int getDumpType() { return 'R'; }
     int getPostCount() { return 1; }
-	
+
     void setPoints() {
 	super.setPoints();
 	lead1 = interpPoint(point1, point2, 1-circleSize/dn);
@@ -59,7 +59,7 @@ class RailElm extends VoltageElm {
 	drawRail(g);
 	drawPosts(g);
 	curcount = updateDotCount(-current, curcount);
-	if (sim.dragElm != this)
+	if (!isCreating())
 	    drawDots(g, point1, lead1, curcount);
     }
 
@@ -90,22 +90,53 @@ class RailElm extends VoltageElm {
     }
     
     double getVoltageDiff() { return volts[0]; }
-    void stamp() {
-	if (waveform == WF_DC)
-	    sim.stampVoltageSource(0, nodes[0], voltSource, getVoltage());
+    void setVoltageSource(int n, VoltageSource v) {
+	super.setVoltageSource(n, v);
+	if (internalResistance > 0)
+	    v.setNodes(CircuitNode.ground, nodes[1]);
 	else
-	    sim.stampVoltageSource(0, nodes[0], voltSource);
+	    v.setNodes(CircuitNode.ground, nodes[0]);
+    }
+    void stamp() {
+	CircuitNode vsNode = internalResistance > 0 ? nodes[1] : nodes[0];
+	if (waveform == WF_DC)
+	    sim.stampVoltageSource(CircuitNode.ground, vsNode, voltSource, getVoltage());
+	else
+	    sim.stampVoltageSource(CircuitNode.ground, vsNode, voltSource);
+	if (internalResistance > 0)
+	    sim.stampResistor(nodes[1], nodes[0], internalResistance);
     }
     void doStep() {
+	CircuitNode vsNode = internalResistance > 0 ? nodes[1] : nodes[0];
 	if (waveform != WF_DC)
-	    sim.updateVoltageSource(0, nodes[0], voltSource, getVoltage());
+	    sim.updateVoltageSource(CircuitNode.ground, vsNode, voltSource, getVoltage());
     }
     boolean hasGroundConnection(int n1) { return true; }
+    void addRoutingObstacle(WireRouter router) {
+	router.addWire(point1.x, point1.y, point2.x, point2.y);
+	router.addObstacle(point2.x - circleSize, point2.y - circleSize,
+			   point2.x + circleSize, point2.y + circleSize);
+    }
+
     int getShortcut() { return 'V'; }
-    
+    boolean validateRailNode(int n) {
+	FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(n), sim);
+	if (fpi.findPath(CircuitNode.ground)) {
+	    //sim.stop("Path to ground with no resistance!", this);
+	    internalResistance = .001;
+	    return false;
+	}
+	return true;
+    }
+    boolean validate() { return internalResistance > 0 || validateRailNode(0); }
+
+    boolean getDragVertical(boolean requestedVertical) {
+        return requestedVertical;
+    }
+
 //    void drawHandles(Graphics g, Color c) {
 //    	g.setColor(c);
 //		g.fillRect(x-3, y-3, 7, 7);
 //    }
-    
+
 }

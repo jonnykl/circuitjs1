@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class OutputElm extends CircuitElm {
@@ -38,9 +41,16 @@ class OutputElm extends CircuitElm {
 	    } catch (Exception e) {}
 	}
 	
-	String dump() {
-	    return super.dump() + " " + scale;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "sc", scale);
 	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    scale = xml.parseIntAttr("sc", scale);
+	}
+
 	int getDumpType() { return 'O'; }
 	int getPostCount() { return 1; }
 	void setPoints() {
@@ -52,13 +62,12 @@ class OutputElm extends CircuitElm {
 	    boolean selected = needsHighlight();
 	    Font f = new Font("SansSerif", selected ? Font.BOLD : 0, 14);
 	    g.setFont(f);
-	    g.setColor(selected ? selectColor : whiteColor);
+	    g.setColor(selected ? selectColor : lightGrayColor);
 	    String s = showVoltage() ? getUnitTextWithScale(volts[0], "V", scale, isFixed()) : Locale.LS("out");
 //	    FontMetrics fm = g.getFontMetrics();
-	    if (this == sim.plotXElm)
-		s = "X";
-	    if (this == sim.plotYElm)
-		s = "Y";
+	    String role = app.mouse.scopePlotRoles.get(this);
+	    if (role != null && !role.isEmpty())
+		s = role;
 	    interpPoint(point1, point2, lead1, 1-((int)g.context.measureText(s).getWidth()/2+8)/dn);
 	    setBbox(point1, lead1, 0);
 	    drawCenteredText(g, s, x2, y2, true);
@@ -69,6 +78,11 @@ class OutputElm extends CircuitElm {
 	    drawPosts(g);
 	    g.restore();
 	}
+	void addRoutingObstacle(WireRouter router) {
+	    router.addWire(point1.x, point1.y, x2, y2);
+	    router.addObstacle(x2 - 10, y2 - 10, x2 + 10, y2 + 10);
+	}
+
 	double getVoltageDiff() { return volts[0]; }
 	void getInfo(String arr[]) {
 	    arr[0] = "output";

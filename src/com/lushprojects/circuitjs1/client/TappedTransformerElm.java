@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
     class TappedTransformerElm extends CircuitElm {
 	double inductance, ratio, couplingCoef;
 	int flip;
@@ -37,6 +40,7 @@ package com.lushprojects.circuitjs1.client;
 	    curSourceValue = new double[3];
 	    a = new double[9];
 	}
+	
 	public TappedTransformerElm(int xa, int ya, int xb, int yb, int f,
 			      StringTokenizer st) {
 	    super(xa, ya, xb, yb, f);
@@ -59,10 +63,35 @@ package com.lushprojects.circuitjs1.client;
 	    a = new double[9];
 	}
 	int getDumpType() { return 169; }
+	String getXmlDumpType() { return "tt"; }
 	String dump() {
 	    return super.dump() + " " + inductance + " " + ratio + " " +
 		current[0] + " " + current[1] + " " + current[2] + " " + couplingCoef;
 	}
+
+        void dumpXml(Document doc, Element elem) {
+            super.dumpXml(doc, elem);
+            XMLSerializer.dumpAttr(elem, "in", inductance);
+            XMLSerializer.dumpAttr(elem, "ra", ratio);
+            XMLSerializer.dumpAttr(elem, "co", couplingCoef);
+        }
+
+        void dumpXmlState(Document doc, Element elem) {
+            XMLSerializer.dumpAttr(elem, "c0", current[0]);
+            XMLSerializer.dumpAttr(elem, "c1", current[1]);
+            XMLSerializer.dumpAttr(elem, "c2", current[2]);
+        }
+
+        void undumpXml(XMLDeserializer xml) {
+            super.undumpXml(xml);
+            inductance = xml.parseDoubleAttr("in", inductance);
+            ratio = xml.parseDoubleAttr("ra", ratio);
+            couplingCoef = xml.parseDoubleAttr("co", couplingCoef);
+            current[0] = xml.parseDoubleAttr("c0", 0);
+            current[1] = xml.parseDoubleAttr("c1", 0);
+            current[2] = xml.parseDoubleAttr("c2", 0);
+        }
+
 	void draw(Graphics g) {
 	    int i;
 	    for (i = 0; i != 5; i++) {
@@ -256,13 +285,15 @@ package com.lushprojects.circuitjs1.client;
 		return true;
 	    return false;
 	}
+	// VCCS stamps couple all nodes, so they must all be in the same matrix
+	boolean getMatrixConnection(int n1, int n2) { return true; }
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo("Primary Inductance (H)", inductance, .01, 5);
+		return new EditInfo("Primary Inductance (H)", inductance, .01, 5).setPositive();
 	    if (n == 1)
-		return new EditInfo("Ratio (N1/N2)", 1/ratio, 1, 10).setDimensionless();
+		return new EditInfo("Ratio (N1/N2)", 1/ratio, 1, 10).setDimensionless().setPositive();
 	    if (n == 2)
-		return new EditInfo("Coupling Coefficient", couplingCoef, 0, 1).setDimensionless();
+		return new EditInfo("Coupling Coefficient", couplingCoef, 0, 1).setDimensionless().setPositive();
 	    if (n == 3) {
 		EditInfo ei = new EditInfo("", 0, -1, -1);
 		ei.checkbox = new Checkbox("Trapezoidal Approximation",
@@ -276,8 +307,12 @@ package com.lushprojects.circuitjs1.client;
 		inductance = ei.value;
 	    if (n == 1 && ratio > 0)
 		ratio = 1/ei.value;
-	    if (n == 2 && ei.value > 0 && ei.value < 1)
-		couplingCoef = ei.value;
+	    if (n == 2) {
+		if (ei.value > 0 && ei.value < 1)
+		    couplingCoef = ei.value;
+		else
+		    ei.setError("must be > 0 and < 1");
+	    }
 	    if (n == 3) {
 		if (ei.checkbox.getState())
 		    flags &= ~Inductor.FLAG_BACK_EULER;

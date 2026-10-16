@@ -4,6 +4,8 @@ import java.util.Vector;
 
 import com.google.gwt.user.client.Window;
 import com.google.gwt.user.client.ui.Button;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 // instances of subcircuits
@@ -14,6 +16,7 @@ public class CustomCompositeElm extends CompositeElm {
     int postCount;
     int inputCount, outputCount;
     CustomCompositeModel model;
+    double highVoltage;
     static String lastModelName = "default";
     static final int FLAG_SMALL = 2;
     
@@ -25,7 +28,7 @@ public class CustomCompositeElm extends CompositeElm {
 	modelName = (xx == 0 && yy == 0) ? "default" : lastModelName;
 		
 	flags |= FLAG_ESCAPE;
-	if (sim.smallGridCheckItem.getState())
+	if (useSmallGrid())
 	    flags |= FLAG_SMALL;
 	updateModels();
     }
@@ -34,7 +37,7 @@ public class CustomCompositeElm extends CompositeElm {
 	super(xx, yy);
 	modelName = name;
 	flags |= FLAG_ESCAPE;
-	if (sim.smallGridCheckItem.getState())
+	if (useSmallGrid())
 	    flags |= FLAG_SMALL;
 	updateModels();
     }
@@ -45,48 +48,46 @@ public class CustomCompositeElm extends CompositeElm {
 	modelName = CustomLogicModel.unescape(st.nextToken());
 	updateModels(st);
     }
-    
-    public String dump() {
-	// insert model name before the elements
-	String s = super.dumpWithMask(0);
-	s += " " + CustomLogicModel.escape(modelName);
-	s += dumpElements();
-	return s;
-    }
-    
-    String dumpModel() {
-	String modelStr = "";
-	
-	// dump models of all children
-	for (int i = 0; i < compElmList.size(); i++) {
-	    CircuitElm ce = compElmList.get(i);
-	    String m = ce.dumpModel();
-	    if (m != null && !m.isEmpty()) {
-		if (!modelStr.isEmpty())
-		    modelStr += "\n";
-		modelStr += m;
-	    }
+
+    void dumpXmlModel(Document doc) {
+	// dump models of all children first
+	if (compElmList != null) {
+	    for (int i = 0; i < compElmList.size(); i++)
+		compElmList.get(i).dumpXmlModel(doc);
 	}
-	if (model.dumped)
-	    return modelStr;
-	
-	// dump our model
-	if (!modelStr.isEmpty())
-	    modelStr += "\n";
-	modelStr += model.dump();
-	
-	return modelStr;
+	// model may be missing (e.g. wasn't available under its scope in this circuit); modelName
+	// attribute is still dumped by dumpXml() so the reference is preserved for a future retry
+	if (model != null && !(model.builtin || model.dumped))
+	    model.dumpXml(doc);
     }
-    
+
+    void dumpXml(Document doc, Element elem) {
+	dumpXmlModel(doc);
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "mo", modelName);
+	if (highVoltage != 0)
+	    XMLSerializer.dumpAttr(elem, "hv", highVoltage);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+	modelName = xml.parseStringAttr("mo", modelName);
+	highVoltage = xml.parseDoubleAttr("hv", 0);
+	updateModels();
+	super.undumpXml(xml);
+    }
+
     void draw(Graphics g) {
 	int i;
 	for (i = 0; i != postCount; i++) {
 	    chip.volts[i] = volts[i];
-	    chip.pins[i].current = getCurrentIntoNode(i); 
+	    chip.pins[i].current = getCurrentIntoNode(i);
 	}
 	chip.setSelected(needsHighlight());
 	chip.draw(g);
-	boundingBox = chip.boundingBox;
+    }
+
+    void addRoutingObstacle(WireRouter router) {
+	chip.addRoutingObstacle(router);
     }
 
     void setPoints() {
@@ -94,11 +95,24 @@ public class CustomCompositeElm extends CompositeElm {
 	chip.x2 = x2;
 	chip.y2 = y2;
 	chip.flags = (flags & (ChipElm.FLAG_FLIP_X | ChipElm.FLAG_FLIP_Y | ChipElm.FLAG_FLIP_XY));
-        if (x2-x > model.sizeX*16 && this == sim.dragElm)
+
+	if (model == null) {
+	    // model couldn't be resolved (missing/not in scope); draw as a labeled placeholder
+	    // instead of crashing, so the rest of the circuit stays usable
+	    chip.setSize((flags & FLAG_SMALL) != 0 ? 1 : 2);
+	    chip.setLabel("?");
+	    chip.sizeX = chip.sizeY = 2;
+	    chip.allocPins(0);
+	    chip.setPoints();
+	    boundingBox = chip.boundingBox;
+	    return;
+	}
+
+        if (x2-x > model.sizeX*16 && isCreating())
 	    flags &= ~FLAG_SMALL;
 	chip.setSize((flags & FLAG_SMALL) != 0 ? 1 : 2);
 	chip.setLabel((model.flags & CustomCompositeModel.FLAG_SHOW_LABEL) != 0 ? model.name : null);
-	
+
 	chip.sizeX = model.sizeX;
 	chip.sizeY = model.sizeY;
 	chip.allocPins(postCount);
@@ -106,17 +120,21 @@ public class CustomCompositeElm extends CompositeElm {
 	for (i = 0; i != postCount; i++) {
 	    ExtListEntry pin = model.extList.get(i);
 	    chip.setPin(i, pin.pos, pin.side, pin.name);
+	    chip.pins[i].busWidth = pin.busWidth;
+	    chip.pins[i].busZ = pin.busZ;
 	}
-	
+
 	chip.setPoints();
+	boundingBox = chip.boundingBox;
 	for (i = 0; i != getPostCount(); i++)
 	    setPost(i, chip.getPost(i));
     }
 
     public void updateModels() {
+	model = null;
 	updateModels(null);
     }
-    
+
     void flipX(int center2, int count) {
 	flags ^= ChipElm.FLAG_FLIP_X;
 	if (count != 1) {
@@ -156,32 +174,68 @@ public class CustomCompositeElm extends CompositeElm {
     }
 
     public void updateModels(StringTokenizer st) {
-	model = CustomCompositeModel.getModelWithName(modelName);
-	if (model == null)
+	if (model != null && model.name.equals(modelName))
 	    return;
+	model = CustomCompositeModel.getModelWithName(modelName);
+	if (model == null) {
+	    // referenced subcircuit model isn't available (e.g. not in scope in this circuit).
+	    // fall back to an empty/placeholder state instead of leaving fields uninitialized,
+	    // so the rest of the circuit keeps working; modelName is preserved so a later
+	    // updateModels() call (if the model becomes available) can still resolve it
+	    postCount = 0;
+	    compElmList = new Vector<CircuitElm>();
+	    numPosts = numNodes = 0;
+	    posts = new Point[0];
+	    allocNodes();
+	    setPoints();
+	    return;
+	}
 	postCount = model.extList.size();
 	int externalNodes[] = new int[postCount];
 	int i;
 	for (i = 0; i != postCount; i++)
 	    externalNodes[i] = model.extList.get(i).node;
-	if (st == null)
-	    st = new StringTokenizer(model.elmDump, " ");
-	loadComposite(st, model.nodeList, externalNodes);
+	if (st != null) {
+	    // old-format constructor: use loadComposite with per-instance state
+	    loadComposite(st, model.getNodeList(), externalNodes);
+	} else {
+	    loadCompositeXml(model.getElmEntries(), externalNodes);
+	}
+	propagateHighVoltage();
 	allocNodes();
 	setPoints();
     }
     
+    void propagateHighVoltage() {
+	if (highVoltage == 0)
+	    return;
+	for (int i = 0; i != compElmList.size(); i++) {
+	    CircuitElm ce = compElmList.get(i);
+	    ce.setHighVoltage(highVoltage);
+	    if (ce instanceof CustomCompositeElm)
+		((CustomCompositeElm) ce).propagateHighVoltage();
+	}
+    }
+
+    void setHighVoltage(double hv) { highVoltage = hv; }
+
     int getPostCount() { return postCount; }
+    int getPostWidth(int n) {
+	return chip != null ? chip.getPostWidth(n) : 1;
+    }
     
     Vector<CustomCompositeModel> models;
     
     public EditInfo getEditInfo(int n) {
-	// if model is built in, don't allow it to be changed
-	if (model.builtin)
+	// if model is internal, don't allow it to be changed
+	if (model != null && model.internal)
 	    n += 2;
-	
+
 	if (n == 0) {
-	    EditInfo ei = new EditInfo(EditInfo.makeLink("subcircuits.html", "Model Name"), 0, -1, -1);
+	    String label = (model == null) ?
+		(Locale.LS("Model not found: ") + modelName) :
+		EditInfo.makeLink("subcircuits.html", "Model Name");
+	    EditInfo ei = new EditInfo(label, 0, -1, -1);
             models = CustomCompositeModel.getModelList();
             ei.choice = new Choice();
             int i;
@@ -193,21 +247,32 @@ public class CustomCompositeElm extends CompositeElm {
             }
 	    return ei;
 	}
+	// remaining fields all depend on having a resolved model
+	if (model == null)
+	    return null;
         if (n == 1) {
             EditInfo ei = new EditInfo("", 0, -1, -1);
             ei.button = new Button(Locale.LS("Edit Pin Layout"));
             return ei;
         }
-        if (n == 2 && model.canLoadModelCircuit()) {
+        if (n == 2 && canViewComponents()) {
             EditInfo ei = new EditInfo("", 0, -1, -1);
-            ei.button = new Button(Locale.LS("Load Model Circuit"));
+            ei.button = new Button(Locale.LS("View Components"));
+            return ei;
+        }
+	int hvIdx = (canViewComponents()) ? 3 : 2;
+        if (n == hvIdx)
+            return new EditInfo("High Logic Voltage (0=default)", highVoltage, 0, 10).setUnitStep();
+        if (n == hvIdx+1 && model.canLoadModelCircuit()) {
+            EditInfo ei = new EditInfo("", 0, -1, -1);
+            ei.button = new Button(Locale.LS("Edit Model"));
             return ei;
         }
 	return null;
     }
 
     public void setEditValue(int n, EditInfo ei) {
-	if (model.builtin)
+	if (model != null && model.internal)
 	    n += 2;
 	if (n == 0) {
             model = models.get(ei.choice.getSelectedIndex());
@@ -216,6 +281,8 @@ public class CustomCompositeElm extends CompositeElm {
 	    setPoints();
 	    return;
 	}
+	if (model == null)
+	    return;
         if (n == 1) {
             if (model.name.equals("default")) {
         	Window.alert(Locale.LS("Can't edit this model."));
@@ -229,24 +296,106 @@ public class CustomCompositeElm extends CompositeElm {
             return;
         }
         if (n == 2) {
-            sim.readCircuit(model.modelCircuit);
+            app.ui.pushSubcircuit(this, buildDisplayElmList());
+            CirSim.editDialog.closeDialog();
+        }
+	int hvIdx = (canViewComponents()) ? 3 : 2;
+        if (n == hvIdx) {
+            highVoltage = ei.value;
+            propagateHighVoltage();
+        }
+        if (n == hvIdx+1) {
+            app.pushContext(model.name);
+            if (model.modelCircuit != null)
+        	app.readCircuit(model.modelCircuit);
+            else {
+        	XMLDeserializer xml = new XMLDeserializer(app);
+        	xml.readCircuit(model.elmDoc);
+            }
             CirSim.editDialog.closeDialog();
         }
     }
     
-    int getDumpType() { return 410; }
+    // build a display list with all elements including ones skipped by loadCompositeXml
+    Vector<CircuitElm> buildDisplayElmList() {
+	Vector<CircuitElm> allElms = new Vector<CircuitElm>(compElmList);
+	Vector<Element> elmEntries = model.getElmEntries();
+	XMLDeserializer xml = new XMLDeserializer(app);
+	int compIdx = 0;
+	for (Element childElem : elmEntries) {
+	    String tagName = childElem.getTagName();
+	    String className = CirSim.xmlDumpTypeMap.get(tagName);
+	    if (className == null)
+		continue;
+	    CircuitElm ce;
+	    if (className.equals("WireElm") || className.equals("RoutedWireElm") || className.equals("LabeledNodeElm") || className.equals("ScopeElm") ||
+		    className.equals("GraphicElm") ||
+		    (className.equals("GroundElm") && childElem.getAttribute("x") != null)) {
+		ce = CirSim.constructElement(className, 0, 0);
+		xml.parseChildElement(childElem);
+		ce.undumpXml(xml);
+		allElms.add(ce);
+	    } else {
+		ce = compElmList.get(compIdx++);
+	    }
+	    ce.setPositionFromXml(childElem);
+	}
+	return allElms;
+    }
 
+    boolean canViewComponents() {
+	if (model == null)
+	    return false;
+	Vector<Element> elmEntries = model.getElmEntries();
+	XMLDeserializer xml = new XMLDeserializer(app);
+	int compIdx = 0;
+	for (Element childElem : elmEntries) {
+	    if (childElem.getAttribute("x") != null)
+		return true;
+        }
+	return false;
+    }
+
+    void onDoubleClick() {
+	if (canViewComponents())
+	    app.ui.pushSubcircuit(this, buildDisplayElmList());
+	else if (!app.ui.isReadOnly())
+            app.commands.doEdit(this);
+    }
+
+    int getDumpType() { return 410; }
+    String getXmlDumpType() { return "cc"; }
+
+    String getElmType() { return "subcircuit"; }
     void getInfo(String arr[]) {
 	super.getInfo(arr);
-	if (model.builtin)
+	if (model == null) {
+	    arr[0] = Locale.LS("subcircuit") +  " (" + Locale.LS("missing: ") + modelName + ")";
+	    return;
+	}
+	if (model.builtin && model.name.startsWith("~"))
 	    arr[0] = model.name.substring(1);
 	else
 	    arr[0] = "subcircuit (" + model.name + ")";
-	int i;
-	for (i = 0; i != postCount; i++) {
-	    if (i+1 >= arr.length)
+	int a = 1;
+	for (int i = 0; i != postCount; i++) {
+	    if (a >= arr.length)
 		break;
-	    arr[i+1] = model.extList.get(i).name + " = " + getVoltageText(volts[i]);
+	    ExtListEntry ent = model.extList.get(i);
+	    if (ent.busZ > 0)
+		continue;
+	    if (ent.busWidth > 1) {
+		int value = 0;
+		for (int j = 0; j < ent.busWidth; j++)
+		    if (volts[i+j] > chip.getThreshold())
+			value |= 1 << j;
+		arr[a] = ent.name + " = " + value + " / 0x" + Integer.toHexString(value).toUpperCase();
+	    } else {
+		arr[a] = ent.name + " = " + getVoltageText(volts[i]);
+	    }
+	    a++;
 	}
     }
+
+    int getNumHandles() { return 0; }
 }

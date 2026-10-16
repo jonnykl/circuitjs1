@@ -19,12 +19,16 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 // SPDT switch
 
     class Switch2Elm extends SwitchElm {
 	int link;
 	int throwCount;
 	static final int FLAG_CENTER_OFF = 1;
+	static final int FLAG_FLIPPED = 8; // tracks runtime flip state for sync
 	
 	public Switch2Elm(int xx, int yy) {
 	    super(xx, yy, false);
@@ -47,8 +51,17 @@ package com.lushprojects.circuitjs1.client;
 	    noDiagonal = true;
 	}
 	int getDumpType() { return 'S'; }
-	String dump() {
-	    return super.dump() + " " + link + " " + throwCount;
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "li", link);
+	    XMLSerializer.dumpAttr(elem, "th", throwCount);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    link = xml.parseIntAttr("li", link);
+	    throwCount = xml.parseIntAttr("th", throwCount);
 	}
 
 	final int openhs = 16;
@@ -116,16 +129,27 @@ package com.lushprojects.circuitjs1.client;
 	void calculateCurrent() {
 	    if (position == 2 && hasCenterOff())
 		current = 0;
+	    else if (resistance > 0)
+		current = (volts[0] - volts[position+1]) / resistance;
 	}
 	
-	void stamp() {
-	    if (position == 2 && hasCenterOff()) // in center?
-		return;
-	    sim.stampVoltageSource(nodes[0], nodes[position+1], voltSource, 0);
+	void setVoltageSource(int n, VoltageSource v) {
+	    voltSource = v;
+	    v.setNodes(nodes[0], nodes[position+1]);
 	}
-		
+	void stamp() {
+	    if (position == 2 && hasCenterOff())
+		return;
+	    if (resistance > 0)
+		sim.stampResistor(nodes[0], nodes[position+1], resistance);
+	    else
+		sim.stampVoltageSource(nodes[0], nodes[position+1], voltSource, 0);
+	}
+
 	int getVoltageSourceCount() {
-	    return (position == 2 && hasCenterOff()) ? 0 : 1; 	    
+	    if (position == 2 && hasCenterOff())
+		return 0;
+	    return resistance > 0 ? 0 : 1;
 	}
 	
 	void toggle() {
@@ -136,8 +160,13 @@ package com.lushprojects.circuitjs1.client;
 		    Object o = sim.elmList.elementAt(i);
 		    if (o instanceof Switch2Elm) {
 			Switch2Elm s2 = (Switch2Elm) o;
-			if (s2.link == link && position < s2.posCount)
-			    s2.position = position;
+			if (s2.link == link) {
+			    int pos = position;
+			    if (s2.isPositionFlipped() != this.isPositionFlipped())
+				pos = posCount - 1 - pos;
+			    if (pos < s2.posCount)
+				s2.position = pos;
+			}
 		    }
 		}
 	    }
@@ -148,11 +177,12 @@ package com.lushprojects.circuitjs1.client;
 	    return comparePair(n1, n2, 0, 1+position);
 	}
 	
-	boolean isWireEquivalent() { return true; }
+	boolean isWireEquivalent() { return resistance == 0; }
 	
 	// optimizing out this element is too complicated to be worth it (see #646)
 	boolean isRemovableWire() { return false; }
 	
+	String getElmType() { return "switch (SPDT)"; }
 	void getInfo(String arr[]) {
 	    arr[0] = "switch (" + (link == 0 ? "S" : "D") + "P" +
 		    ((throwCount > 2) ? throwCount+"T)" : "DT)");
@@ -165,7 +195,7 @@ package com.lushprojects.circuitjs1.client;
 	    	return ei;
 	    }*/
 	    if (n == 1)
-	    	return new EditInfo("Switch Group", link, 0, 100).setDimensionless().disallowSliders();
+	    	return new EditInfo("Group Number (for linking)", link, 0, 100).setDimensionless().disallowSliders();
 	    if (n == 2)
 	    	return new EditInfo("# of Throws", throwCount, 2, 10).setDimensionless().disallowSliders();
 	    return super.getEditInfo(n);
@@ -194,22 +224,50 @@ package com.lushprojects.circuitjs1.client;
 	
 	// this is for backwards compatibility only.  we only support it if throwCount = 2
 	boolean hasCenterOff() { return (flags & FLAG_CENTER_OFF) != 0 && throwCount == 2; }
+	boolean isPositionFlipped() { return (flags & FLAG_FLIPPED) != 0; }
 	
+	void addRoutingObstacle(WireRouter router) {
+	    router.addWire(point1.x, point1.y, lead1.x, lead1.y);
+	    for (int i = 0; i != throwCount; i++)
+		router.addWire(swposts[i].x, swposts[i].y, swpoles[i].x, swpoles[i].y);
+	    Point[] pts = new Point[throwCount + 1];
+	    pts[0] = lead1;
+	    for (int i = 0; i != throwCount; i++)
+		pts[i + 1] = swpoles[i];
+	    router.addObstacle(pts);
+	}
+
 	int getShortcut() { return 'S'; }
 
 	void flipX(int c2, int count) {
 	    super.flipX(c2, count);
 	    position = posCount-1-position;
-	}   
-		 
-	void flipY(int c2, int count) { 
+	    flags ^= FLAG_FLIPPED;
+	}
+
+	void flipY(int c2, int count) {
 	    super.flipY(c2, count);
 	    position = posCount-1-position;
+	    flags ^= FLAG_FLIPPED;
 	}
 
 	void flipXY(int c2, int count) {
 	    super.flipXY(c2, count);
 	    position = posCount-1-position;
+	    flags ^= FLAG_FLIPPED;
 	}       
 
+	boolean validate() {
+	    if (position == 2 && hasCenterOff())
+		return true;
+	    if (resistance > 0)
+		return true;
+	    FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(0), sim);
+	    if (fpi.findPath(getNode(1+position))) {
+		//sim.stop("Voltage source/wire loop with no resistance!", this);
+		resistance = .001;
+		return false;
+	    }
+	    return true;
+	}
     }

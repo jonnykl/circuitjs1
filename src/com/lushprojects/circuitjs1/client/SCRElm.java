@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 // Silicon-Controlled Rectifier
 // 3 nodes, 1 internal node
 // 0 = anode, 1 = cathode, 2 = gate
@@ -75,11 +78,22 @@ class SCRElm extends CircuitElm {
 	lastvag = lastvac = curcount_a = curcount_c = curcount_g = 0;
     }
     int getDumpType() { return 177; }
-    String dump() {
-	return super.dump() + " " + (volts[anode]-volts[cnode]) + " " +
-	    (volts[anode]-volts[gnode]) + " " + triggerI + " "+  holdingI + " " +
-	    gresistance;
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "tr", triggerI);
+        XMLSerializer.dumpAttr(elem, "ho", holdingI);
+        XMLSerializer.dumpAttr(elem, "gr", gresistance);
     }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        triggerI = xml.parseDoubleAttr("tr", triggerI);
+        holdingI = xml.parseDoubleAttr("ho", holdingI);
+        gresistance = xml.parseDoubleAttr("gr", gresistance);
+	setup();
+    }
+
     double ia, ic, ig, curcount_a, curcount_c, curcount_g;
     double lastvac, lastvag;
     double gresistance, triggerI, holdingI;
@@ -118,16 +132,16 @@ class SCRElm extends CircuitElm {
 
 	gate = newPointArray(2);
 	double leadlen = (dn-16)/2;
-	int gatelen = sim.gridSize;
-	gatelen += leadlen % sim.gridSize;
+	int gatelen = app.gridSize;
+	gatelen += leadlen % app.gridSize;
 	if (leadlen < gatelen) {
 	    x2 = x; y2 = y;
 	    return;
 	}
 	interpPoint(lead2, point2, gate[0], gatelen/leadlen, gatelen*dir);
-	interpPoint(lead2, point2, gate[1], gatelen/leadlen, sim.gridSize*2*dir);
-	gate[1].x = sim.snapGrid(gate[1].x);
-	gate[1].y = sim.snapGrid(gate[1].y);
+	interpPoint(lead2, point2, gate[1], gatelen/leadlen, app.gridSize*2*dir);
+	gate[1].x = snapGrid(gate[1].x);
+	gate[1].y = snapGrid(gate[1].y);
     }
 	
     void draw(Graphics g) {
@@ -156,14 +170,14 @@ class SCRElm extends CircuitElm {
 	curcount_a = updateDotCount(ia, curcount_a);
 	curcount_c = updateDotCount(ic, curcount_c);
 	curcount_g = updateDotCount(ig, curcount_g);
-	if (sim.dragElm != this) {
+	if (!isCreating()) {
 	    drawDots(g, point1, lead2, curcount_a);
 	    drawDots(g, point2, lead2, curcount_c);
 	    drawDots(g, gate[1], gate[0], curcount_g);
 	    drawDots(g, gate[0], lead2, curcount_g+distance(gate[1], gate[0]));
 	}
 	
-	if ((needsHighlight() || sim.dragElm == this) && point1.x == point2.x && point2.y > point1.y) {
+	if ((needsHighlight() || isCreating()) && point1.x == point2.x && point2.y > point1.y) {
 	    g.setColor(whiteColor);
 	    int ds = sign(dx);
 	    g.drawString("C", lead2.x+((ds < 0) ? 5 : -15), lead2.y+12);
@@ -238,19 +252,19 @@ class SCRElm extends CircuitElm {
     }
     public EditInfo getEditInfo(int n) {
 	if (n == 0)
-	    return new EditInfo("Trigger Current (A)", triggerI, 0, 0);
+	    return new EditInfo("Trigger Current (A)", triggerI, 0, 0).setPositive();
 	if (n == 1)
-	    return new EditInfo("Holding Current (A)", holdingI, 0, 0);
+	    return new EditInfo("Holding Current (A)", holdingI, 0, 0).setPositive();
 	if (n == 2)
-	    return new EditInfo("Gate Resistance (ohms)", gresistance, 0, 0);
+	    return new EditInfo("Gate Resistance (ohms)", gresistance, 0, 0).setPositive();
 	return null;
     }
     public void setEditValue(int n, EditInfo ei) {
-	if (n == 0 && ei.value > 0)
+	if (n == 0)
 	    triggerI = ei.value;
-	if (n == 1 && ei.value > 0)
+	if (n == 1)
 	    holdingI = ei.value;
-	if (n == 2 && ei.value > 0)
+	if (n == 2)
 	    gresistance = ei.value;
     }
 
@@ -258,7 +272,7 @@ class SCRElm extends CircuitElm {
     // is pointed and flip won't work.  fix this
     void fixEnds() {
 	Point pt = new Point();
-	interpPoint(point1, point2, pt, 1, sim.gridSize*dir);
+	interpPoint(point1, point2, pt, 1, app.gridSize*dir);
 	x2 = pt.x; y2 = pt.y;
     }
 

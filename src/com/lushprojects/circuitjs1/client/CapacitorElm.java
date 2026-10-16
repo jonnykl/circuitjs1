@@ -20,6 +20,8 @@
 package com.lushprojects.circuitjs1.client;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 class CapacitorElm extends CircuitElm {
 	double capacitance;
@@ -48,6 +50,7 @@ class CapacitorElm extends CircuitElm {
 
 		// if you add more things here, check PolarCapacitorElm.  It loads more state after this
 	    } catch (Exception e) {}
+	    allocNodes();
 	}
 	boolean isTrapezoidal() { return (flags & FLAG_BACK_EULER) == 0; }
 	
@@ -68,6 +71,27 @@ class CapacitorElm extends CircuitElm {
 	    return super.dump() + " " + capacitance + " " + voltdiff + " " + initialVoltage + " " + seriesResistance;
 	}
 	
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "c", capacitance);
+	    XMLSerializer.dumpAttr(elem, "iv", initialVoltage);
+	    XMLSerializer.dumpAttr(elem, "sr", seriesResistance);
+	    // PolarCapacitorElm uses mv
+	}
+
+	void dumpXmlState(Document doc, Element elem) {
+	    XMLSerializer.dumpAttr(elem, "vd", voltdiff);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    capacitance = xml.parseDoubleAttr("c", capacitance);
+	    initialVoltage = xml.parseDoubleAttr("iv", initialVoltage);
+	    seriesResistance = xml.parseDoubleAttr("sr", seriesResistance);
+	    voltdiff = xml.parseDoubleAttr("vd", voltdiff);
+	    allocNodes();
+	}
+
 	// used for PolarCapacitorElm
 	Point platePoints[];
 	
@@ -93,7 +117,7 @@ class CapacitorElm extends CircuitElm {
 	    drawThickLine(g, point1, lead1);
 	    setPowerColor(g, false);
 	    drawThickLine(g, plate1[0], plate1[1]);
-	    if (sim.powerCheckItem.getState())
+	    if (showPower())
 		g.setColor(Color.gray);
 
 	    // draw second lead and plate
@@ -109,18 +133,18 @@ class CapacitorElm extends CircuitElm {
 	    }
 	    
 	    updateDotCount();
-	    if (sim.dragElm != this) {
+	    if (!isCreating()) {
 		drawDots(g, point1, lead1, curcount);
 		drawDots(g, point2, lead2, -curcount);
 	    }
 	    drawPosts(g);
-	    if (sim.showValuesCheckItem.getState()) {
+	    if (showValues()) {
 		String s = getShortUnitText(capacitance, "F");
 		drawValues(g, s, hs);
 	    }
 	}
 	void stamp() {
-	    if (sim.dcAnalysisFlag) {
+	    if (doDcAnalysis()) {
 		// when finding DC operating point, replace cap with a 100M resistor
 		sim.stampResistor(nodes[0], nodes[1], 1e8);
 		curSourceValue = 0;
@@ -170,7 +194,7 @@ class CapacitorElm extends CircuitElm {
 	
 	void calculateCurrent() {
 	    double voltdiff = volts[0] - volts[capNode2];
-	    if (sim.dcAnalysisFlag) {
+	    if (doDcAnalysis()) {
 		current = voltdiff/1e8;
 		return;
 	    }
@@ -182,22 +206,31 @@ class CapacitorElm extends CircuitElm {
 	}
 	double curSourceValue;
 	void doStep() {
-	    if (sim.dcAnalysisFlag)
+	    if (doDcAnalysis())
 		return;
 	    sim.stampCurrentSource(nodes[0], nodes[capNode2], curSourceValue);
  	}
-	int getInternalNodeCount() { return (!sim.dcAnalysisFlag && seriesResistance > 0) ? 1 : 0; }
+	int getInternalNodeCount() { return (!doDcAnalysis() && seriesResistance > 0) ? 1 : 0; }
 	void getInfo(String arr[]) {
 	    arr[0] = "capacitor";
 	    getBasicInfo(arr);
 	    arr[3] = "C = " + getUnitText(capacitance, "F");
 	    arr[4] = "P = " + getUnitText(getPower(), "W");
-	    //double v = getVoltageDiff();
-	    //arr[4] = "U = " + getUnitText(.5*capacitance*v*v, "J");
+	    arr[5] = "Q = " + getUnitText(capacitance * voltdiff, "C");
 	}
 	@Override
 	String getScopeText(int v) {
 	    return Locale.LS("capacitor") + ", " + getUnitText(capacitance, "F");
+	}
+	double getScopeValue(int x) {
+	    if (x == Scope.VAL_CHARGE)
+		return capacitance * voltdiff;
+	    return super.getScopeValue(x);
+	}
+	int getScopeUnits(int x) {
+	    if (x == Scope.VAL_CHARGE)
+		return Scope.UNITS_C;
+	    return super.getScopeUnits(x);
 	}
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
@@ -210,7 +243,7 @@ class CapacitorElm extends CircuitElm {
 	    if (n == 2)
 		return new EditInfo("Initial Voltage (on Reset)", initialVoltage);
 	    if (n == 3)
-		return new EditInfo("Series Resistance (0 = infinite)", seriesResistance);
+		return new EditInfo("Series Resistance", seriesResistance);
 	    // if you add more things here, check PolarCapacitorElm
 	    return null;
 	}
@@ -225,8 +258,10 @@ class CapacitorElm extends CircuitElm {
 	    }
 	    if (n == 2)
 		initialVoltage = ei.value;
-	    if (n == 3)
+	    if (n == 3) {
 		seriesResistance = ei.value;
+		allocNodes();
+	    }
 	}
 	int getShortcut() { return 'c'; }
 	public double getCapacitance() { return capacitance; }
@@ -234,4 +269,24 @@ class CapacitorElm extends CircuitElm {
 	public void setCapacitance(double c) { capacitance = c; }
 	public void setSeriesResistance(double c) { seriesResistance = c; }
 	public boolean isIdealCapacitor() { return (seriesResistance == 0); }
+
+	public void addRoutingObstacle(WireRouter wr) { addRoutingObstacleWithLeads(wr, 12); }
+	boolean validate() {
+	    if (isIdealCapacitor()) {
+		FindPathInfo fpi = new FindPathInfo(FindPathInfo.SHORT, this, getNode(1), sim);
+		if (fpi.findPath(getNode(0))) {
+		    CirSim.console(this + " shorted");
+		    shorted();
+		} else {
+		    fpi = new FindPathInfo(FindPathInfo.CAP_V, this, getNode(1), sim);
+		    if (fpi.findPath(getNode(0))) {
+			// loop of ideal capacitors; set a small series resistance to avoid
+			// oscillation in case one of them has voltage on it
+			setSeriesResistance(.1);
+			return false;
+		    }
+		}
+	    }
+	    return true;
+	}
     }

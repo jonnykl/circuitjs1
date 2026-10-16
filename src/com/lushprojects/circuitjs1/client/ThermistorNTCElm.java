@@ -7,6 +7,8 @@ import com.google.gwt.user.client.Command;
 import com.google.gwt.canvas.dom.client.CanvasGradient;
 import com.google.gwt.event.dom.client.MouseWheelEvent;
 import com.google.gwt.event.dom.client.MouseWheelHandler;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 /*Bill Collis - June 2015
 
@@ -69,32 +71,48 @@ class ThermistorNTCElm extends CircuitElm implements Command, MouseWheelHandler 
 	createSlider(); //uses position to set the slider
     }
 
-    //void setup() {
-    //}
-
     int getPostCount() { return 2; }
     int getDumpType() { return 350; } //NTC thermistor
 
-    //data for file saving - make sure it matches order of items in file input constructor
-    String dump() { 
-	return super.dump() + " " + r25 + " " + r50 + " " + minTempr + " " + maxTempr +" " + position  + " " + CustomLogicModel.escape(sliderText); 
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "r25", r25);
+	XMLSerializer.dumpAttr(elem, "r50", r50);
+	XMLSerializer.dumpAttr(elem, "mnt", minTempr);
+	XMLSerializer.dumpAttr(elem, "mxt", maxTempr);
+	XMLSerializer.dumpAttr(elem, "ps", position);
+	XMLSerializer.dumpAttr(elem, "st", sliderText);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	r25 = xml.parseDoubleAttr("r25", r25);
+	r50 = xml.parseDoubleAttr("r50", r50);
+	minTempr = xml.parseDoubleAttr("mnt", minTempr);
+	maxTempr = xml.parseDoubleAttr("mxt", maxTempr);
+	position = xml.parseDoubleAttr("ps", position);
+	sliderText = xml.parseStringAttr("st", sliderText);
+	rneg40 = calcResistance(minTempr);
+	b25100 = calcB25100();
+	temperature = temprFromSliderPos();
+	resistance = calcResistance(temperature);
+	createSlider();
     }
 
     void createSlider() {
-	sim.addWidgetToVerticalPanel(label = new Label(sliderText));
+	app.addWidgetToVerticalPanel(label = new Label(sliderText));
 	label.addStyleName("topSpace");
 	int value = (int) (position*100);
-	sim.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101, this, this));
+	app.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101, this, this));
     }
 
     public void execute() {
-	sim.analyzeFlag = true;
+	app.analyzeFlag = true;
 	setPoints();
     }
 
     void delete() {
-	sim.removeWidgetFromVerticalPanel(label);
-	sim.removeWidgetFromVerticalPanel(slider);
+	app.removeWidgetFromVerticalPanel(label);
+	app.removeWidgetFromVerticalPanel(slider);
     }
     Point ps3, ps4;   
 
@@ -127,7 +145,7 @@ class ThermistorNTCElm extends CircuitElm implements Command, MouseWheelHandler 
 	grad.addColorStop(0, getVoltageColor(g,v1).getHexValue());
 	grad.addColorStop(1.0, getVoltageColor(g,v2).getHexValue());
 	g.context.setStrokeStyle(grad);
-	if (!sim.euroResistorCheckItem.getState()) {
+	if (!showEuroResistors()) {
 	    g.context.beginPath();
 	    g.context.moveTo(0,0);
 	    for (i=0;i<4;i++){
@@ -149,7 +167,7 @@ class ThermistorNTCElm extends CircuitElm implements Command, MouseWheelHandler 
 
 
 	g.context.restore();
-	if (sim.showValuesCheckItem.getState()) {
+	if (showValues()) {
 	    temperature = temprFromSliderPos();
 	    resistance = calcResistance(temperature);
 	    String s = getShortUnitText(resistance, "");
@@ -208,7 +226,7 @@ class ThermistorNTCElm extends CircuitElm implements Command, MouseWheelHandler 
 	if (n == 4) {
 	    sliderText = ei.textf.getText();
 	    label.setText(sliderText);
-	    sim.setiFrameHeight();
+	    app.setiFrameHeight();
 	}
 	rneg40 = calcResistance(minTempr);
 	b25100 = calcB25100(); //	

@@ -1,5 +1,11 @@
 # CircuitJS1
 
+<p align="center">
+  <img src="war/icon128.png" alt="CircuitJS1 logo" width="128" height="128">
+  <br>
+  <em>Electronic Circuit Simulator in the Browser</em>
+</p>
+
 ## Introduction
 
 CircuitJS1 is an electronic circuit simulator that runs in the browser. It was originally written by Paul Falstad as a Java Applet. It was adapted by Iain Sharp to run in the browser using GWT.
@@ -8,6 +14,7 @@ For a hosted version of the application see:
 
 * Paul's Page: [http://www.falstad.com/circuit/](http://www.falstad.com/circuit/)
 * Iain's Page: [http://lushprojects.com/circuitjs/](http://lushprojects.com/circuitjs/)
+* Development Branch Version: [https://pfalstad.github.io/circuitjs1/circuitjs.html](https://pfalstad.github.io/circuitjs1/circuitjs.html)
 
 Thanks to: Edward Calver for 15 new components and other improvements; Rodrigo Hausen for file import/export and many other UI improvements; J. Mike Rollins for the Zener diode code; Julius Schmidt for the spark gap code and some examples; Dustin Soodak for help with the user interface improvements; Jacob Calvert for the T Flip Flop; Ben Hayden for scope spectrum; Thomas Reitinger, Krystian Sławiński, Usevalad Khatkevich, Lucio Sciamanna, Mauro Hemerly Gazzani, J. Miguel Silva, and Franck Viard for translations; Andre Adrian for improved emitter coupled oscillator; Felthry for many examples; Colin Howell for code improvements. LZString (c) 2013 pieroxy.
 
@@ -68,6 +75,22 @@ python3 -m http.server
 ```
 
 Then go to the Ports tab, hover over the "Forwarded Address" and click "Follow Link".  Then click `circuitjs.html` to view the application.
+
+### Quick local test
+
+The included `test.sh` script compiles, builds the site, and starts a local server in one step:
+
+```bash
+./test.sh          # builds and serves on port 8000
+./test.sh 9000     # use a custom port
+```
+
+This opens `http://localhost:8000/circuitjs.html` in your browser automatically (macOS). The script finds Gradle via the wrapper (`./gradlew`), the system PATH, or `/tmp/gradle-8.7/`. Requires Python 3 for the HTTP server.
+
+> **Note:** Gradle 8.7 is required (GWT plugin is incompatible with Gradle 9.x). If you don't have it installed, you can download it with:
+> ```bash
+> curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/g.zip && unzip -qo /tmp/g.zip -d /tmp
+> ```
 
 ## Deployment of the web application
 

@@ -20,6 +20,8 @@
 package com.lushprojects.circuitjs1.client;
 
 import com.google.gwt.user.client.Window;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class VCCSElm extends ChipElm {
@@ -45,10 +47,19 @@ class VCCSElm extends ChipElm {
 	    setupPins();
 	}
 	
-	String dump() {
-	    return super.dump() + " " + inputCount + " " + CustomLogicModel.escape(exprString);
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "ic", inputCount);
+	    XMLSerializer.dumpAttr(elem, "ex", exprString);
 	}
-	
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    inputCount = xml.parseIntAttr("ic", inputCount);
+	    exprString = xml.parseStringAttr("ex", exprString);
+	    parseExpr();
+	    setupPins();
+	}
+
 	double lastVolts[];
 	
 	void setupPins() {
@@ -87,7 +98,7 @@ class VCCSElm extends ChipElm {
         }
         
         boolean hasCurrentOutput() { return true; }
-        int getOutputNode(int n) {
+        CircuitNode getOutputNode(int n) {
             return nodes[n+inputCount];
         }
         
@@ -135,7 +146,7 @@ class VCCSElm extends ChipElm {
         	    double dx = (v-v2)/dv;
         	    if (Math.abs(dx) < 1e-6)
         		dx = sign(dx, 1e-6);
-        	    sim.stampVCCurrentSource(nodes[inputCount], nodes[inputCount+1], nodes[i], 0, dx);
+        	    sim.stampVCCurrentSource(nodes[inputCount], nodes[inputCount+1], nodes[i], CircuitNode.ground, dx);
         	    //if (sim.subIterations > 1)
         		//sim.console("ccedx " + i + " " + dx + " " + sim.subIterations + " " + sim.t);
         	    // adjust right side
@@ -165,6 +176,7 @@ class VCCSElm extends ChipElm {
 	boolean getConnection(int n1, int n2) {
 	    return comparePair(inputCount, inputCount+1, n1, n2);
 	}
+	boolean getMatrixConnection(int n1, int n2) { return true; }
 	boolean hasGroundConnection(int n1) {
 	    return false;
 	}
@@ -184,7 +196,7 @@ class VCCSElm extends ChipElm {
         public void setChipEditValue(int n, EditInfo ei) {
             if (n == 0) {
         	exprString = ei.textf.getText();
-        	parseExpr();
+        	parseExpr(ei);
         	return;
             }
             if (n == 1) {
@@ -202,12 +214,16 @@ class VCCSElm extends ChipElm {
             parseExpr();
         }
         
-        void parseExpr() {
+        void parseExpr() { parseExpr(null); }
+
+        void parseExpr(EditInfo ei) {
             ExprParser parser = new ExprParser(exprString);
             expr = parser.parseExpression();
             String err = parser.gotError();
-            if (err != null)
-        	Window.alert(Locale.LS("Parse error in expression") + ": " + exprString + ": " + err);
+            if (err != null) {
+		ei.setErrorFieldName("Output Function");
+        	ei.setError(Locale.LS("Parse error in expression") + ": " + exprString + ": " + err);
+	    }
         }
         
         void getInfo(String arr[]) {
@@ -220,6 +236,14 @@ class VCCSElm extends ChipElm {
         void reset() {
             super.reset();
             exprState.reset();
+        }
+        boolean validate() {
+            FindPathInfo fpi = new FindPathInfo(FindPathInfo.INDUCT, this, getOutputNode(0), sim);
+            if (hasCurrentOutput() && !fpi.findPath(getOutputNode(1)))
+        	broken = true;
+            else
+        	broken = false;
+            return true;
         }
     }
 

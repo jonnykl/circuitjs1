@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class MemristorElm extends CircuitElm {
@@ -46,9 +49,23 @@ class MemristorElm extends CircuitElm {
 	resistance = 100;
     }
     int getDumpType() { return 'm'; }
-    String dump() {
-	return super.dump() + " " + r_on + " " + r_off + " " + dopeWidth + " " +
-	    totalWidth + " " + mobility + " " + current;
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "ron", r_on);
+        XMLSerializer.dumpAttr(elem, "rof", r_off);
+        XMLSerializer.dumpAttr(elem, "do", dopeWidth);
+        XMLSerializer.dumpAttr(elem, "to", totalWidth);
+        XMLSerializer.dumpAttr(elem, "mo", mobility);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        r_on = xml.parseDoubleAttr("ron", r_on);
+        r_off = xml.parseDoubleAttr("rof", r_off);
+        dopeWidth = xml.parseDoubleAttr("do", dopeWidth);
+        totalWidth = xml.parseDoubleAttr("to", totalWidth);
+        mobility = xml.parseDoubleAttr("mo", mobility);
     }
 
     Point ps3, ps4;

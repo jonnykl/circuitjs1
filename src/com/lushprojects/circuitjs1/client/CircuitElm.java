@@ -31,6 +31,9 @@ import com.google.gwt.storage.client.Storage;
 import com.google.gwt.user.client.Random;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 // circuit element class
 public abstract class CircuitElm implements Editable {
     static double voltageRange = 5;
@@ -41,10 +44,13 @@ public abstract class CircuitElm implements Editable {
     // scratch points for convenience
     static Point ps1, ps2;
     
-    static CirSim sim;
+    static CirSim app;
+    static SimulationManager sim;
     static public Color whiteColor, lightGrayColor, selectColor;
     static public Color positiveColor, negativeColor, neutralColor, currentColor;
     static Font unitsFont;
+    static Font valueFont;
+    static int valueFontSize = 12;
 
     static NumberFormat showFormat, shortFormat, fixedFormat;
     static final double pi = 3.14159265358979323846;
@@ -63,7 +69,9 @@ public abstract class CircuitElm implements Editable {
     // point to which user dragged out element.  For simple two-terminal elements, this is the second node/post
     int x2, y2;
     
-    int flags, nodes[], voltSource;
+    int flags;
+    VoltageSource voltSource;
+    CircuitNode nodes[];
     
     // length along x and y axes, and sign of difference
     int dx, dy, dsign;
@@ -91,16 +99,24 @@ public abstract class CircuitElm implements Editable {
     boolean noDiagonal;
     
     public boolean selected;
+    // the CompositeElm (subcircuit chip) this element is a child of, if any
+    CircuitElm parent;
     
-    boolean hasWireInfo; // used in calcWireInfo()
     
 //    abstract int getDumpType();
     int getDumpType() {
+	return 0;
 	
-	throw new IllegalStateException(); // Seems necessary to work-around what appears to be a compiler
+	//throw new IllegalStateException(); // Seems necessary to work-around what appears to be a compiler
 	// bug affecting OTAElm to make sure this method (which should really be abstract) throws
 	// an exception.  If you're getting this, try making small update to CompositeElm.java and try again
- }
+    }
+    String getXmlDumpType() { 
+	int t = getDumpType();
+	if (t > 64 && t < 127)
+	    return Character.toString((char) t);
+	return getClassName().replace("Elm", "");
+    }
     
     // leftover from java, doesn't do anything anymore. 
     Class getDumpClass() { return getClass(); }
@@ -109,16 +125,16 @@ public abstract class CircuitElm implements Editable {
 
     boolean hasFlag(int f) { return (flags & f) != 0; }
     
-    static void initClass(CirSim s) {
-	unitsFont = new Font("SansSerif", 0, 12);
-	sim = s;
-	
+    static void initClass(CirSim app_, SimulationManager sim_) {
+	sim = sim_;
+	app = app_;
+
 	colorScale = new Color[colorScaleCount];
-	
-	
+
+
 	ps1 = new Point();
 	ps2 = new Point();
-	
+
 	Storage stor = Storage.getLocalStorageIfSupported();
 	decimalDigits = 3;
 	shortDecimalDigits = 1;
@@ -129,9 +145,14 @@ public abstract class CircuitElm implements Editable {
 		decimalDigits = Integer.parseInt(s1);
 	    if (s2 != null)
 		shortDecimalDigits = Integer.parseInt(s2);
+	    String sf = stor.getItem("valueFontSize");
+	    if (sf != null)
+		valueFontSize = Integer.parseInt(sf);
 	}
 	setDecimalDigits(decimalDigits, false, false);
 	setDecimalDigits(shortDecimalDigits, true, false);
+	unitsFont = new Font("SansSerif", 0, 12);
+	valueFont = new Font("SansSerif", 0, valueFontSize);
     }
 
     static void setDecimalDigits(int num, boolean sf, boolean save) {
@@ -165,6 +186,14 @@ public abstract class CircuitElm implements Editable {
 	}
     }
     
+    static void setValueFontSize(int size) {
+	valueFontSize = size;
+	valueFont = new Font("SansSerif", 0, valueFontSize);
+	Storage stor = Storage.getLocalStorageIfSupported();
+	if (stor != null)
+	    stor.setItem("valueFontSize", Integer.toString(valueFontSize));
+    }
+
     static void setColorScale() {
 
 	int i;
@@ -211,10 +240,10 @@ public abstract class CircuitElm implements Editable {
     
     // allocate nodes/volts arrays we need
     void allocNodes() {
-	int n = getPostCount() + getInternalNodeCount();
+	int n = getNodeCount();
 	// preserve voltages if possible
 	if (nodes == null || nodes.length != n) {
-	    nodes = new int[n];
+	    nodes = new CircuitNode[n];
 	    volts = new double[n];
 	}
     }
@@ -229,31 +258,60 @@ public abstract class CircuitElm implements Editable {
     // handle reset button
     void reset() {
 	int i;
-	for (i = 0; i != getPostCount()+getInternalNodeCount(); i++)
+	for (i = 0; i != getNodeCount(); i++)
 	    volts[i] = 0;
 	curcount = 0;
     }
     void draw(Graphics g) {}
-    
-    // set current for voltage source vn to c.  vn will be the same value as in a previous call to setVoltageSource(n, vn) 
-    void setCurrent(int vn, double c) { current = c; }
-    
+
+    // override this in elements that use highVoltage (gates, chips, inverters, etc.)
+    void setHighVoltage(double hv) {}
+
+    // set current for voltage source vn to c.  vn will be the same value as in a previous call to setVoltageSource(n, vn)
+    void setCurrent(VoltageSource vs, double c) { current = c; }
+
+    // set current for wire-like elements (called from calcWireCurrents, one call per bit for bus wires)
+    void setWireCurrent(int bit, double c) { current = c; }
+
     // get current for one- or two-terminal elements
     double getCurrent() { return current; }
 
     void setParentList(Vector<CircuitElm> elmList) {}
     
+    Vector<CircuitElm> getChildElmList() { return null; }
+
+    // called before makeNodeList to allow elements to set up internal node counts, etc.
+    void preStamp() {}
+
     // stamp matrix values for linear elements.
     // for non-linear elements, use this to stamp values that don't change each iteration, and call stampRightSide() or stampNonLinear() as needed
     void stamp() {}
+
+    // add this element as an obstacle to the wire router grid
+    void addRoutingObstacle(WireRouter router) {
+	if (x == x2 || y == y2) {
+	    router.addWire(x, y, x2, y2);
+	    if (lead1 != null && lead2 != null)
+		router.addObstacle(lead1.x, lead1.y, lead2.x, lead2.y);
+	}
+    }
     
+    void addRoutingObstacleWithLeads(WireRouter router, int width) {
+	if (x == x2 || y == y2) {
+	    router.addWire(x, y, x2, y2);
+	    Point pa = interpPoint(lead1, lead2, 0, width);
+	    Point pb = interpPoint(lead1, lead2, 1, -width);
+	    router.addObstacle(pa.x, pa.y, pb.x, pb.y);
+	}
+    }
+
     // stamp matrix values for non-linear elements
     void doStep() {}
     
     void delete() {
 	if (mouseElmRef==this)
 	    mouseElmRef=null;
-	sim.deleteSliders(this);
+	app.deleteSliders(this);
     }
     void startIteration() {}
     
@@ -292,6 +350,34 @@ public abstract class CircuitElm implements Editable {
 	lead2 = interpPoint(point1, point2, (dn+len)/(2*dn));
     }
 
+    // Returns true if (px,py) lies strictly inside the axis-aligned segment (ax,ay)-(bx,by).
+    static boolean pointOnSegmentInterior(int ax, int ay, int bx, int by, int px, int py) {
+	if (px == ax && py == ay || px == bx && py == by) return false;
+	if (ax == bx && px == ax) {
+	    int miny = Math.min(ay, by), maxy = Math.max(ay, by);
+	    return py > miny && py < maxy;
+	} else if (ay == by && py == ay) {
+	    int minx = Math.min(ax, bx), maxx = Math.max(ax, bx);
+	    return px > minx && px < maxx;
+	}
+	return false;
+    }
+
+    // Returns which post (0 or 1) has a lead stub containing (px,py), or -1 if neither.
+    int getLeadPost(int px, int py) {
+	if (lead1 != null && lead1 != point1 &&
+	    pointOnSegmentInterior(point1.x, point1.y, lead1.x, lead1.y, px, py))
+	    return 0;
+	if (lead2 != null && lead2 != point2 &&
+	    pointOnSegmentInterior(lead2.x, lead2.y, point2.x, point2.y, px, py))
+	    return 1;
+	// 1-post elements with no explicit leads (e.g. GroundElm): the whole point1→point2 segment is the lead
+	if (lead1 == null && getPostCount() == 1 &&
+	    pointOnSegmentInterior(point1.x, point1.y, point2.x, point2.y, px, py))
+	    return 0;
+	return -1;
+    }
+
     // adjust leads so that the point exactly between them is a grid point (so we can place a terminal there)
     void adjustLeadsToGrid(boolean flipX, boolean flipY) {
         int cx = (point1.x+point2.x)/2;
@@ -301,8 +387,8 @@ public abstract class CircuitElm implements Editable {
 	int roundx = (flipX) ? 1 : -1;
 	int roundy = (flipY) ? 1 : -1;
 
-        int adjx = sim.snapGrid(cx+roundx)-cx;
-        int adjy = sim.snapGrid(cy+roundy)-cy;
+        int adjx = snapGrid(cx+roundx)-cx;
+        int adjy = snapGrid(cy+roundy)-cy;
         lead1.move(adjx, adjy);
         lead2.move(adjx, adjy);
     }
@@ -388,11 +474,13 @@ public abstract class CircuitElm implements Editable {
 	return a;
     }
 
+    int snapGrid(int z) { return app.snapGrid(z); }
+
     final int CURRENT_TOO_FAST = 100;
 
     // draw current dots from point a to b
     void drawDots(Graphics g, Point pa, Point pb, double pos) {
-	 if ((!sim.simIsRunning()) || pos == 0 || !sim.dotsCheckItem.getState())
+	 if ((!app.simIsRunning()) || pos == 0 || !app.menus.dotsCheckItem.getState())
 	    return;
 	int dx = pb.x-pa.x;
 	int dy = pb.y-pa.y;
@@ -468,8 +556,8 @@ public abstract class CircuitElm implements Editable {
     
     // draw second point to xx, yy
     void drag(int xx, int yy) {
-	xx = sim.snapGrid(xx);
-	yy = sim.snapGrid(yy);
+	xx = snapGrid(xx);
+	yy = snapGrid(yy);
 	if (noDiagonal) {
 	    if (Math.abs(x-xx) < Math.abs(y-yy)) {
 		xx = x;
@@ -481,6 +569,44 @@ public abstract class CircuitElm implements Editable {
 	setPoints();
     }
     
+    // Default length (in pixels) used when this element is placed via toolbar
+    // drag-and-drop, since there's no drag-to-size gesture to set the length by hand
+    // in that case.  Override for elements that look better a bit longer/shorter.
+    int getDragLength() {
+	return 64;
+    }
+
+    // Override (ignoring requestedVertical) for elements that should only ever be
+    // placed vertically via toolbar drag-and-drop, e.g. GroundElm, VoltageElm.
+    boolean getDragVertical(boolean requestedVertical) {
+	return requestedVertical;
+    }
+
+    // Positions this element for toolbar drag-and-drop placement: (xa,ya) is the
+    // anchor point that tracks the mouse, in circuit coordinates, already snapped to
+    // the grid.  Called repeatedly as the mouse moves and whenever the requested
+    // orientation changes (e.g. the shift key toggled without the mouse moving), so
+    // it must be idempotent given the same arguments.  Override for elements where a
+    // different point (rather than x,y) should track the mouse, e.g. RailElm, where
+    // the label should track the mouse rather than the connection post.
+    void dragPlace(int xa, int ya, boolean vertical) {
+	vertical = getDragVertical(vertical);
+	int len = getDragLength();
+	x = xa; y = ya;
+	x2 = xa + (vertical ? 0 : len);
+	y2 = ya + (vertical ? len : 0);
+	setPoints();
+    }
+
+    // swap the two endpoints in place; for use by dragPlace() overrides on elements
+    // where a different point (rather than x,y) should track the mouse anchor
+    void swapDragEndpoints() {
+	int tx = x, ty = y;
+	x = x2; y = y2;
+	x2 = tx; y2 = ty;
+	setPoints();
+    }
+
     void move(int dx, int dy) {
 	x += dx; y += dy; x2 += dx; y2 += dy;
 	boundingBox.translate(dx, dy);
@@ -498,7 +624,17 @@ public abstract class CircuitElm implements Editable {
 	y = y_;
 	x2 = x2_;
 	y2 = y2_;
+	initBoundingBox();
 	setPoints();
+    }
+
+    void setPositionFromXml(Element elem) {
+	String x = elem.getAttribute("x");
+	if (x == null)
+	    return;
+	String xs[] = x.split(" ");
+	setPosition(Integer.parseInt(xs[0]), Integer.parseInt(xs[1]),
+		    Integer.parseInt(xs[2]), Integer.parseInt(xs[3]));
     }
     
     // determine if moving this element by (dx,dy) will put it on top of another element
@@ -507,9 +643,7 @@ public abstract class CircuitElm implements Editable {
 	int ny = y+dy;
 	int nx2 = x2+dx;
 	int ny2 = y2+dy;
-	int i;
-	for (i = 0; i != sim.elmList.size(); i++) {
-	    CircuitElm ce = sim.getElm(i);
+	for (CircuitElm ce : app.elmList) {
 	    if (ce.x == nx && ce.y == ny && ce.x2 == nx2 && ce.y2 == ny2)
 		return false;
 	    if (ce.x == nx2 && ce.y == ny2 && ce.x2 == nx && ce.y2 == ny)
@@ -573,16 +707,38 @@ public abstract class CircuitElm implements Editable {
 	// we normally do this in updateCircuit() now because the logic is more complicated.
 	// we only handle the case where we have to draw all the posts.  That happens when
 	// this element is selected or is being created
-	if (sim.dragElm == null && !needsHighlight())
+	if (!isCreating() && !needsHighlight())
 	    return;
-	if (sim.mouseMode == CirSim.MODE_DRAG_ROW ||
-	    sim.mouseMode == CirSim.MODE_DRAG_COLUMN)
+	if (app.mouse.mouseMode == MouseManager.MODE_DRAG_ROW ||
+	    app.mouse.mouseMode == MouseManager.MODE_DRAG_COLUMN)
 	    return;
 	int i;
 	for (i = 0; i != getPostCount(); i++) {
 	    Point p = getPost(i);
 	    drawPost(g, p);
 	}
+	drawScopeTerminalLabels(g);
+    }
+
+    void drawScopeTerminalLabels(Graphics g) {
+	if (getPostCount() != 2)
+	    return;
+	if (!app.mouse.scopePlotRoles.containsKey(this))
+	    return;
+	if (dn == 0)
+	    return;
+	g.setColor(selectColor);
+	g.setFont(unitsFont);
+	g.save();
+	g.context.setTextBaseline("middle");
+	g.context.setTextAlign("center");
+	int axOff = 10, perpOff = 8;
+	boolean swap = this instanceof VoltageElm;
+	Point pp = interpPoint(point1, point2, axOff / dn, perpOff);
+	g.drawString(swap ? "−" : "+", pp.x, pp.y);
+	Point mp = interpPoint(point1, point2, 1 - axOff / dn, perpOff);
+	g.drawString(swap ? "+" : "−", mp.x, mp.y);
+	g.restore();
     }
     
     int getNumHandles() {
@@ -590,6 +746,8 @@ public abstract class CircuitElm implements Editable {
     }
     
     void drawHandles(Graphics g, Color c) {
+    	if (getNumHandles() == 0)
+	    return;
     	g.setColor(c);
     	if (lastHandleGrabbed==-1)
     		g.fillRect(x-3, y-3, 7, 7);
@@ -619,13 +777,15 @@ public abstract class CircuitElm implements Editable {
     
     // number of internal nodes (nodes not visible in UI that are needed for implementation)
     int getInternalNodeCount() { return 0; }
+
+    int getNodeCount() { return getPostCount() + getInternalNodeCount(); }
     
-    // notify this element that its pth node is n.  This value n can be passed to stampMatrix()
-    void setNode(int p, int n) { nodes[p] = n; }
+    // notify this element that its pth node is n.
+    void setNode(int p, CircuitNode n) { nodes[p] = n; }
     
     // notify this element that its nth voltage source is v.  This value v can be passed to stampVoltageSource(), etc and will be passed back in calls to setCurrent()
-    void setVoltageSource(int n, int v) {
-	// default implementation only makes sense for subclasses with one voltage source.  If we have 0 this isn't used, if we have >1 this won't work 
+    void setVoltageSource(int n, VoltageSource v) {
+	// default implementation only makes sense for subclasses with one voltage source.  If we have 0 this isn't used, if we have >1 this won't work
 	voltSource = v;
     }
     
@@ -636,9 +796,23 @@ public abstract class CircuitElm implements Editable {
     }
     boolean nonLinear() { return false; }
     int getPostCount() { return 2; }
+    int getPostWidth(int n) { return 1; }
+    int getBusWidth() { return 1; }
+
+    // generate WireSegment entries for this wire-like element (called during calculateWireClosureForList)
+    void getWireSegments(Vector<SimulationManager.WireSegment> list) {
+	int bw = getBusWidth();
+	for (int b = 0; b < bw; b++) {
+	    Point p0 = getPost(b);
+	    Point p1 = getConnectedPost(b);
+	    String ep0 = SimulationManager.pointKey(p0);
+	    String ep1 = (p1 != null && !p1.equals(p0)) ? SimulationManager.pointKey(p1) : null;
+	    list.add(new SimulationManager.WireSegment(this, b, ep0, ep1));
+	}
+    }
     
-    // get (global) node number of nth node
-    int getNode(int n) { return nodes[n]; }
+    // get CircuitNode for nth node
+    CircuitNode getNode(int n) { return nodes[n]; }
     
     // get position of nth node
     Point getPost(int n) {
@@ -649,12 +823,16 @@ public abstract class CircuitElm implements Editable {
     Point getConnectedPost() {
 	return point2;
     }
+
+    // return the post that post n connects through to (for bus wires, each bit connects to its counterpart)
+    Point getConnectedPost(int n) {
+	return getConnectedPost();
+    }
     
-    int getNodeAtPoint(int xp, int yp) {
+    int getNodeAtPoint(Point pt) {
 	int i;
 	for (i = 0; i != getPostCount(); i++) {
-	    Point p = getPost(i);
-	    if (p.x == xp && p.y == yp)
+	    if (getPost(i).equals(pt))
 		return i;
 	}
 	return 0;
@@ -662,11 +840,11 @@ public abstract class CircuitElm implements Editable {
     
     /*
     void drawPost(Graphics g, int x0, int y0, int n) {
-	if (sim.dragElm == null && !needsHighlight() &&
-	    sim.getCircuitNode(n).links.size() == 2)
+	if (!isCreating() && !needsHighlight() &&
+	    app.getCircuitNode(n).links.size() == 2)
 	    return;
-	if (sim.mouseMode == CirSim.MODE_DRAG_ROW ||
-	    sim.mouseMode == CirSim.MODE_DRAG_COLUMN)
+	if (app.mouse.mouseMode == MouseManager.MODE_DRAG_ROW ||
+	    app.mouse.mouseMode == MouseManager.MODE_DRAG_COLUMN)
 	    return;
 	drawPost(g, x0, y0);
     }
@@ -738,7 +916,8 @@ public abstract class CircuitElm implements Editable {
     void drawValues(Graphics g, String s, double hs) {
 	if (s == null)
 	    return;
-	g.setFont(unitsFont);
+	g.save();
+	g.setFont(valueFont);
 	//FontMetrics fm = g.getFontMetrics();
 	int w = (int)g.context.measureText(s).getWidth();
 	g.setColor(whiteColor);
@@ -761,9 +940,12 @@ public abstract class CircuitElm implements Editable {
 		xx = xc-(w+abs(dpx)+2);
 	    g.drawString(s, xx, yc+dpy+ya);
 	}
+	g.restore();
     }
     
     void drawLabeledNode(Graphics g, String str, Point pt1, Point pt2) {
+        g.save();
+	g.setFont(valueFont);
 	boolean lineOver = false;
 	if (str.startsWith("/")) {
 	    lineOver = true;
@@ -771,7 +953,6 @@ public abstract class CircuitElm implements Editable {
 	}
         int w=(int)g.context.measureText(str).getWidth();
         int h=(int)g.currentFontSize;
-        g.save();
         g.context.setTextBaseline("middle");
         int x = pt2.x, y = pt2.y;
         if (pt1.y != pt2.y) {
@@ -800,7 +981,7 @@ public abstract class CircuitElm implements Editable {
 	g.context.setLineWidth(3.0);
 	g.context.transform(((double)(p2.x-p1.x))/len, ((double)(p2.y-p1.y))/len,
 		-((double)(p2.y-p1.y))/len,((double)(p2.x-p1.x))/len,p1.x,p1.y);
-	if (sim.voltsCheckItem.getState() ) {
+	if (app.menus.voltsCheckItem.getState() ) {
 	    CanvasGradient grad = g.context.createLinearGradient(0,0,len,0);
 	    grad.addColorStop(0, getVoltageColor(g,v1).getHexValue());
 	    grad.addColorStop(1.0, getVoltageColor(g,v2).getHexValue());
@@ -831,7 +1012,11 @@ public abstract class CircuitElm implements Editable {
     }
 
     static void drawThickLine(Graphics g, Point pa, Point pb) {
-    	g.setLineWidth(3.0);
+	drawThickLine(g, pa, pb, 3);
+    }
+
+    static void drawThickLine(Graphics g, Point pa, Point pb, double width) {
+    	g.setLineWidth(width);
     	g.drawLine(pa.x, pa.y, pb.x, pb.y);
     	g.setLineWidth(1.0);
     }
@@ -973,7 +1158,7 @@ public abstract class CircuitElm implements Editable {
     // update dot positions (curcount) for drawing current (general case for multiple currents)
     double updateDotCount(double cur, double cc) {
   
-	 if (!sim.simIsRunning())
+	 if (!app.simIsRunning())
 	    return cc;
 	double cadd = cur*currentMult;
 	if (cadd > 6 || cadd < -6)
@@ -987,7 +1172,7 @@ public abstract class CircuitElm implements Editable {
     // update and draw current for simple two-terminal element
     void doDots(Graphics g) {
 	updateDotCount();
-	if (sim.dragElm != this)
+	if (!isCreating())
 	    drawDots(g, point1, point2, curcount);
     }
     
@@ -997,7 +1182,21 @@ public abstract class CircuitElm implements Editable {
     // get component info for display in lower right
     void getInfo(String arr[]) {
     }
-    
+
+    // get element type name for edit dialog title.  override if getInfo()[0] includes dynamic state.
+    String getElmType() {
+	String info[] = new String[10];
+	getInfo(info);
+	return info[0];
+    }
+
+    public String getDialogTitle() {
+	String name = getElmType();
+	if (name == null)
+	    return "Edit Component";
+	return "Edit " + name.substring(0, 1).toUpperCase() + name.substring(1);
+    }
+
     int getBasicInfo(String arr[]) {
 	arr[1] = "I = " + getCurrentDText(getCurrent());
 	arr[2] = "Vd = " + getVoltageDText(getVoltageDiff());
@@ -1013,9 +1212,11 @@ public abstract class CircuitElm implements Editable {
     	if (needsHighlight()) {
     	    	return (selectColor);
     	}
-    	if (!sim.voltsCheckItem.getState()) {
+    	if (!app.menus.voltsCheckItem.getState()) {
     	    	return(whiteColor);
     	}
+    	if (Double.isNaN(volts))
+    	    volts = 0;
     	int c = (int) ((volts+voltageRange)*(colorScaleCount-1)/
     		       (voltageRange*2));
     	if (c < 0)
@@ -1036,13 +1237,13 @@ public abstract class CircuitElm implements Editable {
 	  setConductanceColor(g, current/getVoltageDiff());
 	  return;
 	  }*/
-	if (!sim.powerCheckItem.getState() )
+	if (!showPower() )
 	    return;
 	setPowerColor(g, getPower());
     }
     
     void setPowerColor(Graphics g, double w0) {
-	if (!sim.powerCheckItem.getState() )
+	if (!showPower() )
 	    return;
     	if (needsHighlight()) {
 	    	g.setColor(selectColor);
@@ -1078,16 +1279,14 @@ public abstract class CircuitElm implements Editable {
     public EditInfo getEditInfo(int n) { return null; }
     public void setEditValue(int n, EditInfo ei) {}
     
-    // get number of nodes that can be retrieved by getConnectionNode()
-    int getConnectionNodeCount() { return getPostCount(); }
-    
-    // get nodes that can be passed to getConnection(), to test if this element connects
-    // those two nodes; this is the same as getNode() for all but labeled nodes.
-    int getConnectionNode(int n) { return getNode(n); }
-    
     // are n1 and n2 connected by this element?  this is used to determine
     // unconnected nodes, and look for loops
     boolean getConnection(int n1, int n2) { return true; }
+
+    // are n1 and n2 in the same matrix?  by default same as getConnection(), but
+    // can be overridden for elements like MOSFETs where the gate affects drain/source
+    // but isn't electrically connected.  n1 and n2 may be internal nodes.
+    boolean getMatrixConnection(int n1, int n2) { return getConnection(n1, n2); }
     
     // is n1 connected to ground somehow?
     boolean hasGroundConnection(int n1) { return false; }
@@ -1107,11 +1306,21 @@ public abstract class CircuitElm implements Editable {
     boolean comparePair(int x1, int x2, int y1, int y2) {
 	return ((x1 == y1 && x2 == y2) || (x1 == y2 && x2 == y1));
     }
-    boolean needsHighlight() { 
-	return mouseElmRef==this || selected || sim.plotYElm == this ||
+    boolean needsHighlight() {
+	return mouseElmRef==this || selected || app.mouse.scopePlotRoles.containsKey(this) ||
 		// Test if the current mouseElm is a ScopeElm and, if so, does it belong to this elm
-		(mouseElmRef instanceof ScopeElm && ((ScopeElm) mouseElmRef).elmScope.getElm()==this); 
+		(mouseElmRef instanceof ScopeElm && ((ScopeElm) mouseElmRef).elmScope.getElm()==this) ||
+		isOnHighlightedNet();
     }
+    boolean isOnHighlightedNet() {
+	if (app.mouse.highlightedNode == null)
+	    return false;
+	for (int i = 0; i != getPostCount(); i++)
+	    if (nodes[i] == app.mouse.highlightedNode)
+		return true;
+	return false;
+    }
+    boolean isCreating() { return app.mouse.dragElm == this; }
     boolean isSelected() { return selected; }
     boolean canShowValueInScope(int v) { return false; }
     void setSelected(boolean x) { selected = x; }
@@ -1133,8 +1342,26 @@ public abstract class CircuitElm implements Editable {
     Rectangle getBoundingBox() { return boundingBox; }
     boolean needsShortcut() { return getShortcut() > 0; }
     int getShortcut() { return 0; }
+    boolean showValues() { return app.menus.showValuesCheckItem.getState(); }
+    boolean showPower() { return app.menus.powerCheckItem.getState(); }
+    boolean showEuroResistors() { return app.menus.euroResistorCheckItem.getState(); }
+    boolean showOhmSymbol() { return app.menus.showOhmCheckItem.getState(); }
+    boolean useSmallGrid() { return app.menus.smallGridCheckItem.getState(); }
+    boolean doDcAnalysis() { return app.dcAnalysisFlag; }
+    boolean isPrintable() { return app.isPrintable(); }
 
     boolean isGraphicElmt() { return false; }
+
+    boolean validate() { return true; }
+
+    boolean validateRailNode(int n) {
+	FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(n), sim);
+	if (fpi.findPath(CircuitNode.ground)) {
+	    sim.stop("Path to ground with no resistance!", this);
+	    return false;
+	}
+	return true;
+    }
     
     void setMouseElm(boolean v) {
 	if (v)
@@ -1157,6 +1384,7 @@ public abstract class CircuitElm implements Editable {
     }
 
     String dumpModel() { return null; }
+    void dumpXmlModel(Document doc) { }
     
     boolean isMouseElm() {
 	return mouseElmRef==this; 
@@ -1186,6 +1414,18 @@ public abstract class CircuitElm implements Editable {
     
     String getClassName() { return getClass().getName().replace("com.lushprojects.circuitjs1.client.", ""); }
     
+    void dumpXml(Document doc, Element elem) {
+	XMLSerializer.dumpAttr(elem, "x", x + " " + y + " " + x2 + " " + y2);
+	//if (flags != 0)   // can't do this because some elements set flags to a nonzero value in constructor
+	XMLSerializer.dumpAttr(elem, "f", flags);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+	flags = xml.parseIntAttr("f", flags);
+    }
+
+    void dumpXmlState(Document doc, Element elem) { }
+
     native JsArrayString getJsArrayString() /*-{ return []; }-*/;
     
     JsArrayString getInfoJS() {

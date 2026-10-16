@@ -22,6 +22,7 @@ package com.lushprojects.circuitjs1.client;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.Vector;
 import java.util.HashSet;
 import com.google.gwt.user.client.ui.HasHorizontalAlignment;
 import com.google.gwt.user.client.ui.HorizontalPanel;
@@ -59,11 +60,13 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	Context2d context;
 	CustomCompositeModel model;
 	
+	boolean popContext;
+
 	void setModel(CustomCompositeModel m) { model = m; }
 	
         boolean createModel() {
             HashSet<Integer> nodeSet = new HashSet<Integer>();
-            model = CirSim.theSim.getCircuitAsComposite();
+            model = SimulationManager.theSim.getCircuitAsComposite();
             if (model == null)
         	return false;
             if (model.extList.size() == 0) {
@@ -80,7 +83,9 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
             int sideCounts[] = new int[] { 0, 0, 0, 0 };
             for (i = 0; i != postCount; i++) {
         	ExtListEntry pin = model.extList.get(i);
-                sideCounts[pin.side] += 1;
+		// only count first pin of each bus group for layout
+		if (pin.busZ == 0)
+		    sideCounts[pin.side] += 1;
 
         	if (nodeSet.contains(pin.node)) {
         	    Window.alert(Locale.LS("Can't have two input/output nodes connected!"));
@@ -105,7 +110,7 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
             model.sizeX = Math.max(minWidth, pinsNS + xOffsetLeft + xOffsetRight);
             model.sizeY = Math.max(minHeight, pinsWE);
 
-            model.modelCircuit = CirSim.theSim.dumpCircuit();
+            //model.modelCircuit = CirSim.theApp.dumpCircuit();
             return true;
         }
         
@@ -115,8 +120,12 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	}
 	
 	TextBox modelNameTextBox = null;
-	Checkbox saveCheck = null;
+	Choice scopeChoice = null;
 	Checkbox labelCheck = null;
+
+	static final int SCOPE_THIS_CIRCUIT = 0;
+	static final int SCOPE_THIS_SESSION = 1;
+	static final int SCOPE_SAVE_ACROSS_SESSIONS = 2;
 
 	void createDialog() {
 		Button okButton;
@@ -133,7 +142,7 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 		canvas.setCoordinateSpaceWidth(400);
 		canvas.setCoordinateSpaceHeight(400);
 		vp.add(canvas);
-		CirSim.doTouchHandlers(null, canvas.getCanvasElement());
+		MouseManager.doTouchHandlers(null, canvas.getCanvasElement());
 		context = canvas.getContext2d();
 		
 		chip = new CustomCompositeChipElm(50, 50);
@@ -156,7 +165,10 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 		}
 		
 		HorizontalPanel hp = new HorizontalPanel();
-		hp.add(new Label(Locale.LS("Width")));
+		hp.setVerticalAlignment(com.google.gwt.user.client.ui.HasVerticalAlignment.ALIGN_MIDDLE);
+		Label widthLabel = new Label(Locale.LS("Width"));
+		widthLabel.getElement().getStyle().setMarginRight(6, com.google.gwt.dom.client.Style.Unit.PX);
+		hp.add(widthLabel);
 		Button b;
 		hp.add(b = new Button("+"));
 		b.addClickHandler(new ClickHandler() {
@@ -165,12 +177,15 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
                     }
                 });
 		hp.add(b = new Button("-"));
+		b.getElement().getStyle().setMarginRight(10, com.google.gwt.dom.client.Style.Unit.PX);
 		b.addClickHandler(new ClickHandler() {
                     public void onClick(ClickEvent event) {
                 	adjustChipSize(-1, 0);
                     }
                 });
-		hp.add(new Label(Locale.LS("Height")));
+		Label heightLabel = new Label(Locale.LS("Height"));
+		heightLabel.getElement().getStyle().setMarginRight(6, com.google.gwt.dom.client.Style.Unit.PX);
+		hp.add(heightLabel);
 		hp.add(b = new Button("+"));
 		b.addClickHandler(new ClickHandler() {
                     public void onClick(ClickEvent event) {
@@ -193,8 +208,24 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 			drawChip();
 		    }
 		});
-		vp.add(saveCheck = new Checkbox(Locale.LS("Save Across Sessions")));
-		saveCheck.setState(model.isSaved());
+		HorizontalPanel scopePanel = new HorizontalPanel();
+		scopePanel.setVerticalAlignment(com.google.gwt.user.client.ui.HasVerticalAlignment.ALIGN_MIDDLE);
+		scopePanel.addStyleName("topSpace");
+		Label scopeLabel = new Label(Locale.LS("Scope:"));
+		scopeLabel.getElement().getStyle().setMarginRight(8, com.google.gwt.dom.client.Style.Unit.PX);
+		scopePanel.add(scopeLabel);
+		scopeChoice = new Choice();
+		scopeChoice.add(Locale.LS("This Circuit"));
+		scopeChoice.add(Locale.LS("This Session"));
+		scopeChoice.add(Locale.LS("Save Across Sessions"));
+		if (model.isSaved())
+		    scopeChoice.select(SCOPE_SAVE_ACROSS_SESSIONS);
+		else if (model.name != null && CustomCompositeModel.globalModelMap.containsKey(model.name))
+		    scopeChoice.select(SCOPE_THIS_SESSION);
+		else
+		    scopeChoice.select(SCOPE_THIS_CIRCUIT);
+		scopePanel.add(scopeChoice);
+		vp.add(scopePanel);
 	
                 canvas.addMouseDownHandler(this);
                 canvas.addMouseUpHandler(this);
@@ -210,14 +241,12 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
                 hp.add(okButton = new Button(Locale.LS("OK")));
                 hp.setHorizontalAlignment(HasHorizontalAlignment.ALIGN_RIGHT);
                 Button cancelButton;
-		if (model.name == null) {
-		    hp.add(cancelButton = new Button(Locale.LS("Cancel")));
-		    cancelButton.addClickHandler(new ClickHandler() {
-			public void onClick(ClickEvent event) {
-			    closeDialog();
-			}
-		    });
-		}
+		hp.add(cancelButton = new Button(Locale.LS("Cancel")));
+		cancelButton.addClickHandler(new ClickHandler() {
+		    public void onClick(ClickEvent event) {
+			closeDialog();
+		    }
+		});
 		okButton.addClickHandler(new ClickHandler() {
 			public void onClick(ClickEvent event) {
 			    enterPressed();
@@ -234,8 +263,10 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	    for (int i = 0; i != postCount; i++) {
 		ExtListEntry pin = model.extList.get(i);
 		chip.setPin(i, pin.pos, pin.side, pin.name);
+		chip.pins[i].busWidth = pin.busWidth;
+		chip.pins[i].busZ = pin.busZ;
 		chip.volts[i] = 0;
-		if (i == selectedPin)
+		if (selectedPins.contains(i))
 		    chip.pins[i].selected = true;
 	    }
 	    chip.setPoints();
@@ -250,9 +281,40 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 		}
 		model.setName(CustomCompositeElm.lastModelName = name);
 	    }
-	    model.setSaved(saveCheck.getState());
-	    CirSim.theSim.updateModels();
-	    CirSim.theSim.needAnalyze(); // will get singular matrix if we don't do this
+	    int scope = scopeChoice.getSelectedIndex();
+	    // remove from old locations first
+	    CustomCompositeModel.localModelMap.remove(model.name);
+	    CustomCompositeModel.globalModelMap.remove(model.name);
+	    model.setSaved(false); // remove from storage
+	    if (scope == SCOPE_THIS_CIRCUIT) {
+		CustomCompositeModel.localModelMap.put(model.name, model);
+	    } else if (scope == SCOPE_THIS_SESSION) {
+		CustomCompositeModel.globalModelMap.put(model.name, model);
+	    } else {
+		model.setSaved(true); // puts in global map + storage
+	    }
+	    CirSim.theApp.updateModels();
+	    CirSim.theApp.needAnalyze(); // will get singular matrix if we don't do this
+	    if (!popContext && !CirSim.theApp.contextStack.isEmpty()) {
+		// record this model change so it survives when the parent context pops
+		CirSim.theApp.contextStack.lastElement().changedModels.add(model);
+	    }
+	    if (popContext) {
+		// Save the new model, pop context (which reloads old circuit with old models),
+		// then swap the new model back in.  Also carry forward any models changed at
+		// deeper levels so they aren't lost when the parent context pops.
+		CirSim app = CirSim.theApp;
+		CustomCompositeModel savedModel = model;
+		Vector<CustomCompositeModel> changedModels = app.popContextAndGetChangedModels();
+		changedModels.add(savedModel);
+		for (CustomCompositeModel m : changedModels) {
+		    CustomCompositeModel.replaceModel(m);
+		    app.refreshModels(m.name);
+		}
+		// if still in a context, carry forward all changed models to the parent
+		if (!app.contextStack.isEmpty())
+		    app.contextStack.lastElement().changedModels.addAll(changedModels);
+	    }
 	    closeDialog();
 	}
 
@@ -263,7 +325,7 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	    double scalew = context.getCanvas().getWidth()  / (double)(chip.boundingBox.width + chip.boundingBox.x*2);
 	    double scaleh = context.getCanvas().getHeight() / (double)(chip.boundingBox.height + chip.boundingBox.y*2);
 	    scale = 1/Math.min(scalew, scaleh);
-	    context.setFillStyle(CirSim.theSim.getBackgroundColor().getHexValue());
+	    context.setFillStyle(CirSim.theApp.getBackgroundColor().getHexValue());
 		context.setTransform(1, 0, 0, 1, 0, 0);
 	    context.fillRect(0, 0, context.getCanvas().getWidth(), context.getCanvas().getHeight());
 	    context.setTransform(1/scale, 0, 0, 1/scale, 0, 0);
@@ -272,13 +334,38 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	}
 	
 	void adjustChipSize(int dx, int dy) {
-	    if (dx < 0 || dy < 0) {
+	    if (dx < 0) {
 		for (int i = 0; i != postCount; i++) {
 		    Pin p = chip.pins[i];
-		    if (dx < 0 && (p.side == ChipElm.SIDE_N || p.side == ChipElm.SIDE_S) && p.pos >= chip.sizeX+dx)
+		    if (p.busZ > 0) continue;
+		    if ((p.side == ChipElm.SIDE_N || p.side == ChipElm.SIDE_S) && p.pos >= chip.sizeX+dx)
 			return;
-		    if (dy < 0 && (p.side == ChipElm.SIDE_E || p.side == ChipElm.SIDE_W) && p.pos >= chip.sizeY+dy)
-			return;
+		}
+	    }
+	    if (dy < 0) {
+		boolean needShift = false;
+		for (int i = 0; i != postCount; i++) {
+		    Pin p = chip.pins[i];
+		    if (p.busZ > 0) continue;
+		    if ((p.side == ChipElm.SIDE_E || p.side == ChipElm.SIDE_W) && p.pos >= chip.sizeY+dy) {
+			needShift = true;
+			break;
+		    }
+		}
+		if (needShift) {
+		    // check if there's room at the top (no side pins at pos 0)
+		    for (int i = 0; i != postCount; i++) {
+			Pin p = chip.pins[i];
+			if (p.busZ > 0) continue;
+			if ((p.side == ChipElm.SIDE_E || p.side == ChipElm.SIDE_W) && p.pos == 0)
+			    return;
+		    }
+		    // shift all side pins up by 1 to use the room at the top
+		    for (int i = 0; i != postCount; i++) {
+			ExtListEntry pe = model.extList.get(i);
+			if (pe.side == ChipElm.SIDE_E || pe.side == ChipElm.SIDE_W)
+			    pe.pos -= 1;
+		    }
 		}
 	    }
 	    if (chip.sizeX + dx < 1 || chip.sizeY + dy < 1)
@@ -290,7 +377,50 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	}
 	
 	boolean dragging;
-	
+	boolean rubberBand;
+	int rubberBandX1, rubberBandY1, rubberBandX2, rubberBandY2;
+	HashSet<Integer> selectedPins = new HashSet<Integer>();
+	int[] dragStartPosArr;
+	int[] dragStartSideArr;
+	int dragStartPos, dragStartSide, dragCurrentSide;
+
+	int findNearestPin(int x, int y) {
+	    double bestdist = 20;
+	    int best = -1;
+	    for (int i = 0; i != postCount; i++) {
+		Pin p = chip.pins[i];
+		if (p.busZ > 0) continue;
+		int dx = (int)(x*scale) - p.textloc.x;
+		int dy = (int)(y*scale) - p.textloc.y;
+		double dist = Math.hypot(dx, dy);
+		if (dist < bestdist) {
+		    bestdist = dist;
+		    best = i;
+		}
+	    }
+	    return best;
+	}
+
+	void updatePinHighlight() {
+	    for (int i = 0; i != postCount; i++)
+		chip.pins[i].selected = selectedPins.contains(i);
+	}
+
+	void drawRubberBand() {
+	    int x1 = Math.min(rubberBandX1, rubberBandX2);
+	    int y1 = Math.min(rubberBandY1, rubberBandY2);
+	    int w  = Math.abs(rubberBandX2 - rubberBandX1);
+	    int h  = Math.abs(rubberBandY2 - rubberBandY1);
+	    context.save();
+	    context.setTransform(1, 0, 0, 1, 0, 0);
+	    context.setFillStyle("rgba(68,136,255,0.15)");
+	    context.fillRect(x1, y1, w, h);
+	    context.setStrokeStyle("#4488ff");
+	    context.setLineWidth(1);
+	    context.strokeRect(x1, y1, w, h);
+	    context.restore();
+	}
+
 	public void onMouseOver(MouseOverEvent event) {
 	    // TODO Auto-generated method stub
 	    
@@ -302,62 +432,353 @@ public class EditCompositeModelDialog extends Dialog implements MouseDownHandler
 	}
 
 	public void onMouseUp(MouseUpEvent event) {
+	    if (rubberBand) {
+		int x1 = Math.min(rubberBandX1, rubberBandX2);
+		int x2 = Math.max(rubberBandX1, rubberBandX2);
+		int y1 = Math.min(rubberBandY1, rubberBandY2);
+		int y2 = Math.max(rubberBandY1, rubberBandY2);
+		int selSide = selectedPins.isEmpty() ? -1
+			: model.extList.get(selectedPins.iterator().next()).side;
+		for (int i = 0; i != postCount; i++) {
+		    if (chip.pins[i].busZ > 0) continue;
+		    int px = (int)(chip.pins[i].textloc.x / scale);
+		    int py = (int)(chip.pins[i].textloc.y / scale);
+		    if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+			if (selSide == -1) selSide = model.extList.get(i).side;
+			if (model.extList.get(i).side == selSide) selectedPins.add(i);
+		    }
+		}
+		rubberBand = false;
+		updatePinHighlight();
+		drawChip();
+	    }
 	    dragging = false;
 	}
 
 	int selectedPin;
-	
+
 	public void onMouseMove(MouseMoveEvent event) {
 	    mouseMoved(event.getX(), event.getY());
 	}
-	
+
 	void mouseMoved(int x, int y) {
+	    if (rubberBand) {
+		rubberBandX2 = x;
+		rubberBandY2 = y;
+		int x1 = Math.min(rubberBandX1, rubberBandX2);
+		int x2 = Math.max(rubberBandX1, rubberBandX2);
+		int y1 = Math.min(rubberBandY1, rubberBandY2);
+		int y2 = Math.max(rubberBandY1, rubberBandY2);
+		int selSide2 = selectedPins.isEmpty() ? -1
+			: model.extList.get(selectedPins.iterator().next()).side;
+		// first pass: find side from rectangle if none yet committed
+		if (selSide2 == -1) {
+		    for (int i = 0; i != postCount; i++) {
+			if (chip.pins[i].busZ > 0) continue;
+			int px = (int)(chip.pins[i].textloc.x / scale);
+			int py = (int)(chip.pins[i].textloc.y / scale);
+			if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+			    selSide2 = model.extList.get(i).side;
+			    break;
+			}
+		    }
+		}
+		for (int i = 0; i != postCount; i++) {
+		    chip.pins[i].selected = selectedPins.contains(i);
+		    if (chip.pins[i].busZ > 0) continue;
+		    int px = (int)(chip.pins[i].textloc.x / scale);
+		    int py = (int)(chip.pins[i].textloc.y / scale);
+		    if (px >= x1 && px <= x2 && py >= y1 && py <= y2
+			    && model.extList.get(i).side == selSide2)
+			chip.pins[i].selected = true;
+		}
+		drawChip();
+		drawRubberBand();
+		return;
+	    }
 	    if (dragging) {
 		if (selectedPin < 0)
 		    return;
 		int pos[] = new int[2];
-		if (!chip.getPinPos((int)(x*scale), (int)(y*scale), selectedPin, pos))
+		if (!chip.getPinPos((int)(x*scale), (int)(y*scale), dragCurrentSide, pos))
 		    return;
-		ExtListEntry p = model.extList.get(selectedPin);
-		int pn = chip.getOverlappingPin(pos[0], pos[1], selectedPin);
-		if (pn != -1) {
-		    // swap positions with overlapping pin
-		    ExtListEntry p2 = model.extList.get(pn);
-		    p2.pos = p.pos;
-		    p2.side = p.side;
+		dragCurrentSide = pos[1];
+		{
+		    // Reset to drag-start snapshot so each call is idempotent
+		    for (int i = 0; i < postCount; i++) {
+			model.extList.get(i).pos  = dragStartPosArr[i];
+			model.extList.get(i).side = dragStartSideArr[i];
+		    }
+		    int newSide = pos[1];
+		    int maxNewPos = (newSide == ChipElm.SIDE_N || newSide == ChipElm.SIDE_S)
+			    ? chip.sizeX - 1 : chip.sizeY - 1;
+		    int minOff = Integer.MAX_VALUE, maxOff = Integer.MIN_VALUE;
+		    int sameSideCount = 0;
+		    for (int idx : selectedPins) {
+			if (dragStartSideArr[idx] != dragStartSide) continue;
+			sameSideCount++;
+			int off = dragStartPosArr[idx] - dragStartPos;
+			if (off < minOff) minOff = off;
+			if (off > maxOff) maxOff = off;
+		    }
+		    int groupSize = maxOff - minOff + 1;
+		    // If the group doesn't fit on the target side, stay on the current side
+		    if (groupSize > maxNewPos + 1) {
+			newSide = dragStartSide;
+			maxNewPos = (newSide == ChipElm.SIDE_N || newSide == ChipElm.SIDE_S)
+				? chip.sizeX - 1 : chip.sizeY - 1;
+		    }
+		    int anchor = Math.max(-minOff, Math.min(maxNewPos - maxOff, pos[0]));
+		    int delta = anchor - dragStartPos;
+		    boolean sameSide = (newSide == dragStartSide);
+		    boolean contiguous = (groupSize == sameSideCount);
+
+		    if (sameSide && contiguous) {
+			// Swept-range: every non-selected pin the group sweeps over shifts by groupSize
+			// opposite the direction of travel, keeping all positions conflict-free.
+			for (int i = 0; i < postCount; i++) {
+			    if (selectedPins.contains(i) || chip.pins[i].busZ > 0) continue;
+			    if (dragStartSideArr[i] != dragStartSide) continue;
+			    int origPos = dragStartPosArr[i];
+			    int newPos;
+			    if (delta >= 0)
+				newPos = (origPos >= dragStartPos + maxOff + 1 && origPos <= anchor + maxOff)
+					? origPos - groupSize : origPos;
+			    else
+				newPos = (origPos >= anchor + minOff && origPos <= dragStartPos + minOff - 1)
+					? origPos + groupSize : origPos;
+			    if (newPos != origPos) {
+				ExtListEntry pj = model.extList.get(i);
+				pj.pos = newPos;
+				for (int j = 0; j < postCount; j++) {
+				    ExtListEntry pjj = model.extList.get(j);
+				    if (pjj.name.equals(pj.name) && pjj.busWidth == pj.busWidth)
+					pjj.pos = newPos;
+				}
+			    }
+			}
+		    } else {
+			// Cross-side or non-contiguous: displace only pins at the group's landing slots,
+			// pushing them opposite to the direction of travel.
+			HashSet<Integer> groupPos = new HashSet<Integer>();
+			for (int idx : selectedPins) {
+			    if (dragStartSideArr[idx] != dragStartSide) continue;
+			    groupPos.add(anchor + dragStartPosArr[idx] - dragStartPos);
+			}
+			Vector<Integer> displaced = new Vector<Integer>();
+			for (int i = 0; i < postCount; i++) {
+			    if (selectedPins.contains(i) || chip.pins[i].busZ > 0) continue;
+			    if (dragStartSideArr[i] != newSide) continue;
+			    if (groupPos.contains(dragStartPosArr[i])) displaced.add(i);
+			}
+			HashSet<Integer> taken = new HashSet<Integer>();
+			for (int i = 0; i < postCount; i++) {
+			    if (selectedPins.contains(i) || chip.pins[i].busZ > 0) continue;
+			    if (dragStartSideArr[i] == newSide && !groupPos.contains(dragStartPosArr[i]))
+				taken.add(dragStartPosArr[i]);
+			}
+			Vector<Integer> available = new Vector<Integer>();
+			for (int slot = 0; slot <= maxNewPos; slot++)
+			    if (!groupPos.contains(slot) && !taken.contains(slot)) available.add(slot);
+			Collections.sort(displaced, new Comparator<Integer>() {
+			    public int compare(Integer a, Integer b) { return dragStartPosArr[a] - dragStartPosArr[b]; }
+			});
+			Collections.sort(available);
+			Vector<Integer> slots = new Vector<Integer>();
+			if (delta >= 0) {
+			    for (int k = available.size()-1; k >= 0 && slots.size() < displaced.size(); k--)
+				if (available.get(k) < anchor) slots.add(available.get(k));
+			    for (int k = 0; k < available.size() && slots.size() < displaced.size(); k++)
+				if (available.get(k) > anchor + maxOff) slots.add(available.get(k));
+			} else {
+			    for (int k = 0; k < available.size() && slots.size() < displaced.size(); k++)
+				if (available.get(k) > anchor + maxOff) slots.add(available.get(k));
+			    for (int k = available.size()-1; k >= 0 && slots.size() < displaced.size(); k--)
+				if (available.get(k) < anchor) slots.add(available.get(k));
+			}
+			Collections.sort(slots);
+			for (int k = 0; k < displaced.size() && k < slots.size(); k++) {
+			    int newPos = slots.get(k);
+			    ExtListEntry pj = model.extList.get(displaced.get(k));
+			    pj.pos = newPos;
+			    for (int j = 0; j < postCount; j++) {
+				ExtListEntry pjj = model.extList.get(j);
+				if (pjj.name.equals(pj.name) && pjj.busWidth == pj.busWidth)
+				    pjj.pos = newPos;
+			    }
+			}
+		    }
+		    // Move selected pins to their new positions
+		    for (int idx : selectedPins) {
+			if (dragStartSideArr[idx] != dragStartSide) continue;
+			int newPos = anchor + dragStartPosArr[idx] - dragStartPos;
+			ExtListEntry pj = model.extList.get(idx);
+			pj.pos = newPos;  pj.side = newSide;
+			for (int j = 0; j < postCount; j++) {
+			    ExtListEntry pjj = model.extList.get(j);
+			    if (pjj.name.equals(pj.name) && pjj.busWidth == pj.busWidth) {
+				pjj.pos = newPos;  pjj.side = newSide;
+			    }
+			}
+		    }
 		}
-		p.pos  = pos[0];
-		p.side = pos[1];
 		createPinsFromModel();
 		drawChip();
 	    } else {
-		int i;
-		double bestdist = 20;
-		selectedPin = -1;
-		for (i = 0; i != postCount; i++) {
-		    Pin p = chip.pins[i];
-		    int dx = (int)(x*scale) - p.textloc.x;
-		    int dy = (int)(y*scale) - p.textloc.y;
-		    double dist = Math.hypot(dx, dy);
-		    if (dist < bestdist) {
-			bestdist = dist;
-			selectedPin = i;
-		    }
-		    p.selected = false;
-		}
-		if (selectedPin >= 0)
-		    chip.pins[selectedPin].selected = true;
+		// hover: highlight nearest pin without disturbing selectedPins
+		int hoveredPin = findNearestPin(x, y);
+		for (int i = 0; i != postCount; i++)
+		    chip.pins[i].selected = selectedPins.contains(i) || i == hoveredPin;
 		drawChip();
 	    }
 	}
 
 	public void onMouseDown(MouseDownEvent event) {
-	    mouseMoved(event.getX(), event.getY());
+	    int x = event.getX(), y = event.getY();
+	    int hoveredPin = findNearestPin(x, y);
+
+	    if (hoveredPin < 0) {
+		// empty space: start rubber-band selection
+		if (!event.isShiftKeyDown())
+		    selectedPins.clear();
+		rubberBand = true;
+		rubberBandX1 = rubberBandX2 = x;
+		rubberBandY1 = rubberBandY2 = y;
+		updatePinHighlight();
+		drawChip();
+		return;
+	    }
+
+	    rubberBand = false;
+	    if (event.isShiftKeyDown()) {
+		if (selectedPins.contains(hoveredPin)) {
+		    selectedPins.remove(hoveredPin);
+		} else {
+		    int hSide = model.extList.get(hoveredPin).side;
+		    boolean ok = selectedPins.isEmpty();
+		    if (!ok) ok = (model.extList.get(selectedPins.iterator().next()).side == hSide);
+		    if (ok) selectedPins.add(hoveredPin);
+		}
+	    } else {
+		// keep existing multi-selection if clicking one of the selected pins
+		if (!selectedPins.contains(hoveredPin)) {
+		    selectedPins.clear();
+		    selectedPins.add(hoveredPin);
+		}
+	    }
+	    selectedPin = hoveredPin;
+
+	    // record per-pin drag-start positions for delta computation
+	    dragStartPosArr  = new int[postCount];
+	    dragStartSideArr = new int[postCount];
+	    for (int i = 0; i < postCount; i++) {
+		ExtListEntry pe = model.extList.get(i);
+		dragStartPosArr[i]  = pe.pos;
+		dragStartSideArr[i] = pe.side;
+	    }
+	    ExtListEntry sp = model.extList.get(selectedPin);
+	    dragStartPos  = sp.pos;
+	    dragStartSide = dragCurrentSide = sp.side;
+
+	    updatePinHighlight();
 	    dragging = true;
+	    drawChip();
 	}
 
 	public void show() {
 	    super.show();
 	    drawChip();
+	}
+
+	// Preserve pin positions/sides from existingModel in newModel, matching by name.
+	// New pins (no match) are placed in free slots on their assigned side.
+	// Chip size is expanded only if new pins require it.
+	static void preservePinLayout(CustomCompositeModel newModel, CustomCompositeModel existingModel) {
+	    int n = newModel.extList.size();
+	    boolean[] matched = new boolean[n];
+
+	    // Pass 1: copy pos/side from existing model for matched busZ==0 pins; collect placed list
+	    boolean anyPreserved = false;
+	    Vector<int[]> placed = new Vector<int[]>();
+	    for (int i = 0; i < n; i++) {
+		ExtListEntry ent = newModel.extList.get(i);
+		if (ent.busZ != 0) continue;
+		for (ExtListEntry old : existingModel.extList) {
+		    if (old.busZ == 0 && old.name.equals(ent.name)) {
+			ent.pos = old.pos;
+			ent.side = old.side;
+			matched[i] = true;
+			anyPreserved = true;
+			break;
+		    }
+		}
+		if (matched[i])
+		    placed.add(new int[]{ent.pos, ent.side});
+	    }
+	    if (!anyPreserved)
+		return;
+
+	    // Start from existing model's size
+	    newModel.sizeX = existingModel.sizeX;
+	    newModel.sizeY = existingModel.sizeY;
+
+	    // Pass 2: place unmatched busZ==0 pins in free slots using grid-aware overlap detection.
+	    // Iterate over expansion amounts in the outer loop, positions in the inner loop.
+	    // This correctly handles corner conflicts: e.g. with SIDE_E pos=0 placed, pos=p at
+	    // testSizeX=p+1 is always blocked (corner shifts with expansion), but pos=p at
+	    // testSizeX=p+2 is free. A single pos++ loop would miss this and loop forever.
+	    for (int i = 0; i < n; i++) {
+		if (matched[i]) continue;
+		ExtListEntry ent = newModel.extList.get(i);
+		if (ent.busZ != 0) continue;
+		int side = ent.side;
+		boolean ns = (side == ChipElm.SIDE_N || side == ChipElm.SIDE_S);
+		int foundPos = -1;
+		for (int expansion = 0; expansion <= n && foundPos < 0; expansion++) {
+		    int curSizeX = newModel.sizeX + (ns ? expansion : 0);
+		    int curSizeY = newModel.sizeY + (ns ? 0 : expansion);
+		    int maxPos = ns ? curSizeX : curSizeY;
+		    for (int p = 0; p < maxPos; p++) {
+			if (!pinIsOccupied(p, side, placed, curSizeX, curSizeY)) {
+			    foundPos = p;
+			    newModel.sizeX = curSizeX;
+			    newModel.sizeY = curSizeY;
+			    break;
+			}
+		    }
+		}
+		ent.pos = (foundPos >= 0) ? foundPos : 0;
+		placed.add(new int[]{ent.pos, side});
+	    }
+
+	    // Pass 3: propagate pos/side from busZ==0 anchor to bus sub-entries
+	    for (ExtListEntry ent : newModel.extList) {
+		if (ent.busZ == 0) continue;
+		for (ExtListEntry anchor : newModel.extList) {
+		    if (anchor.busZ == 0 && anchor.name.equals(ent.name)) {
+			ent.pos = anchor.pos;
+			ent.side = anchor.side;
+			break;
+		    }
+		}
+	    }
+	}
+
+	// Mirror of ChipElm.Pin.toGrid(), parameterised so it can be called without a chip instance.
+	private static int pinToGrid(int pos, int side, int sizeX, int sizeY) {
+	    if (side == ChipElm.SIDE_N) return pos;
+	    if (side == ChipElm.SIDE_S) return pos + sizeX * (sizeY - 1);
+	    if (side == ChipElm.SIDE_W) return pos * sizeX;
+	    if (side == ChipElm.SIDE_E) return pos * sizeX + sizeX - 1;
+	    return -1;
+	}
+
+	private static boolean pinIsOccupied(int pos, int side, Vector<int[]> placed, int sizeX, int sizeY) {
+	    int g = pinToGrid(pos, side, sizeX, sizeY);
+	    if (g < 0) return true;
+	    for (int[] p : placed) {
+		if (pinToGrid(p[0], p[1], sizeX, sizeY) == g) return true;
+	    }
+	    return false;
 	}
 }

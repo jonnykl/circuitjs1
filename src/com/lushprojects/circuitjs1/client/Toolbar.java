@@ -4,6 +4,7 @@ import com.google.gwt.core.client.EntryPoint;
 import com.google.gwt.core.client.Scheduler;
 import com.google.gwt.dom.client.DivElement;
 import com.google.gwt.dom.client.Document;
+import com.google.gwt.dom.client.NativeEvent;
 import com.google.gwt.dom.client.Style;
 import com.google.gwt.event.dom.client.ClickEvent;
 import com.google.gwt.event.dom.client.ClickHandler;
@@ -16,7 +17,7 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 
 import java.util.HashMap;
 
-public class Toolbar extends HorizontalPanel {
+public class Toolbar extends FlowPanel {
 
     private Label modeLabel;
     private HashMap<String, Label> highlightableButtons = new HashMap<>();
@@ -33,10 +34,10 @@ public class Toolbar extends HorizontalPanel {
         style.setBorderStyle(Style.BorderStyle.SOLID);
         style.setBorderColor("#ccc");
         style.setDisplay(Style.Display.FLEX);
-	setVerticalAlignment(ALIGN_MIDDLE);
+	style.setProperty("alignItems", "center");
 
-	add(createIconButton("ccw", "Undo", new MyCommand("edit", "undo")));
-	add(createIconButton("cw",  "Redo", new MyCommand("edit", "redo")));
+	add(createIconButton("reply",   "Undo", new MyCommand("edit", "undo")));
+	add(createIconButton("forward", "Redo", new MyCommand("edit", "redo")));
 	add(createIconButton("scissors", "Cut", new MyCommand("edit", "cut")));
 	add(createIconButton("copy", "Copy", new MyCommand("edit", "copy")));
 	add(createIconButton("paste", "Paste", new MyCommand("edit", "paste")));
@@ -71,26 +72,23 @@ public class Toolbar extends HorizontalPanel {
 	add(createButtonSet(fetInfo));
 
 	add(createIconButton(inverterIcon, "InverterElm"));
-	String gateInfo[] = { andIcon, "AndGateElm", nandIcon, "NandGateElm", 
-			      orIcon, "OrGateElm", norIcon, "NorGateElm", xorIcon, "XorGateElm" };
+	String gateInfo[] = { andIcon, "AndGateElm", nandIcon, "NandGateElm",
+			      orIcon, "OrGateElm", norIcon, "NorGateElm", xorIcon, "XorGateElm", xnorIcon, "XnorGateElm" };
 	add(createButtonSet(gateInfo));
 
-        // Spacer to push the mode label to the right
-        HorizontalPanel spacer = new HorizontalPanel();
-        //spacer.style.setFlexGrow(1); // Fill remaining space
-        add(spacer);
-
-        // Create and add the mode label on the right
+        // Create and add the mode label
         modeLabel = new Label("");
         styleModeLabel(modeLabel);
         add(modeLabel);
+
+
     }
 
-    public void setModeLabel(String text) { modeLabel.setText(Locale.LS("Mode: ") + text); }
+    public void setModeLabel(String text) { modeLabel.setText(text); }
 
     private Label createIconButton(String icon, String cls) {
-	CirSim sim = CirSim.theSim;
-	return createIconButton(icon, sim.getLabelTextForClass(cls), new MyCommand("main", cls));
+	CirSim app = CirSim.theApp;
+	return createIconButton(icon, app.getLabelTextForClass(cls), new MyCommand("main", cls));
     }
 
     private Label createIconButton(String iconClass, String tooltip, MyCommand command) {
@@ -112,6 +110,7 @@ public class Toolbar extends HorizontalPanel {
         style.setCursor(Style.Cursor.POINTER);
 	if (iconClass.startsWith("<svg"))
 	    style.setPaddingTop(5, Style.Unit.PX);
+	style.setProperty("touchAction", "none");
 
         // Add hover effect for the button
         iconLabel.addMouseOverHandler(event -> iconLabel.getElement().getStyle().setColor("#007bff"));
@@ -132,11 +131,78 @@ public class Toolbar extends HorizontalPanel {
         });
 
         // Track buttons that belong to the "main" command group
-        if (command.getMenuName().equals("main"))
+        if (command.getMenuName().equals("main")) {
             highlightableButtons.put(command.getItemName(), iconLabel);
+
+            // pressing and dragging (rather than just clicking) drops a new element
+            // where the mouse is released, instead of switching modes
+            iconLabel.addMouseDownHandler(mde -> {
+        	if (mde.getNativeButton() == NativeEvent.BUTTON_LEFT)
+        	    UIManager.theUI.mouse.beginToolbarDrag(command.getItemName(), mde.getClientX(), mde.getClientY());
+            });
+            addTouchDragSupport(iconLabel.getElement());
+
+            // while hovering over an element-creation button, tell the user how to use it
+            iconLabel.addMouseOverHandler(event -> {
+        	String label = CirSim.theApp.getLabelTextForClass(command.getItemName());
+        	if (label != null)
+        	    setModeLabel(label + Locale.LS(": Drag And Drop To Create"));
+            });
+            iconLabel.addMouseOutHandler(event -> UIManager.theUI.updateToolbar());
+        }
 
         return iconLabel;
     }
+
+    // Translate touch gestures on a toolbar button into the synthetic mouse events that
+    // beginToolbarDrag/toolbarDragMove/toolbarDragEnd already expect, since iOS/touch browsers
+    // don't emit real mousemove events during a touch-drag (they just pan the page instead).
+    // touchstart re-dispatches a "mousedown" on the button itself, which the existing
+    // MouseDownHandler picks up; touchmove/touchend dispatch "mousemove"/"mouseup" on the
+    // document so UIManager's global NativePreviewHandler (which drives the drag once it's
+    // pending) sees them just like it would for a real mouse drag.
+    private native void addTouchDragSupport(com.google.gwt.dom.client.Element el) /*-{
+	var startX, startY, moved;
+	var TAP_THRESHOLD = 6;
+	el.addEventListener('touchstart', function(e) {
+	    if (e.touches.length != 1)
+		return;
+	    var t = e.touches[0];
+	    startX = t.clientX;
+	    startY = t.clientY;
+	    moved = false;
+	    var me = new MouseEvent('mousedown', { clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true, button: 0 });
+	    el.dispatchEvent(me);
+	}, { passive: true });
+	el.addEventListener('touchmove', function(e) {
+	    if (e.touches.length != 1)
+		return;
+	    e.preventDefault();
+	    var t = e.touches[0];
+	    var dx = t.clientX - startX, dy = t.clientY - startY;
+	    if (dx*dx + dy*dy > TAP_THRESHOLD*TAP_THRESHOLD)
+		moved = true;
+	    var me = new MouseEvent('mousemove', { clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true });
+	    $doc.dispatchEvent(me);
+	}, { passive: false });
+	el.addEventListener('touchend', function(e) {
+	    e.preventDefault();
+	    var t = e.changedTouches[0];
+	    var me = new MouseEvent('mouseup', { clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true });
+	    $doc.dispatchEvent(me);
+	    // preventDefault() suppressed the browser's own synthetic click for this tap,
+	    // so re-create it ourselves when the touch didn't turn into a drag.
+	    if (!moved) {
+		var click = new MouseEvent('click', { clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true });
+		el.dispatchEvent(click);
+	    }
+	}, { passive: false });
+	el.addEventListener('touchcancel', function(e) {
+	    var t = e.changedTouches[0];
+	    var me = new MouseEvent('mouseup', { clientX: t.clientX, clientY: t.clientY, bubbles: true, cancelable: true });
+	    $doc.dispatchEvent(me);
+	}, { passive: true });
+    }-*/;
 
     String makeSvg(String s, int size) {
 	double scale = size/24.0;
@@ -147,8 +213,8 @@ public class Toolbar extends HorizontalPanel {
     // New method for creating variant buttons
     private Label createButtonSet(String info[]) {
 	MyCommand mainCommand = new MyCommand("main", info[1]);
-	CirSim sim = CirSim.theSim;
-	Label iconLabel = createIconButton(info[0], sim.getLabelTextForClass(info[1]), mainCommand);
+	CirSim app = CirSim.theApp;
+	Label iconLabel = createIconButton(info[0], app.getLabelTextForClass(info[1]), mainCommand);
 	
 	FlowPanel paletteContainer = new FlowPanel();
 	paletteContainer.setVisible(false); // Hidden by default
@@ -170,27 +236,50 @@ public class Toolbar extends HorizontalPanel {
 	    Label variantButton = new Label();
 	    variantButton.setText(""); // No text, just an icon
 	    variantButton.getElement().setInnerHTML(makeSvg(info[i], 40));
-	    variantButton.setTitle(sim.getLabelTextForClass(info[i+1]));
+	    variantButton.setTitle(app.getLabelTextForClass(info[i+1]));
 
 	    // Style the variant button
 	    Style variantStyle = variantButton.getElement().getStyle();
 	    variantStyle.setColor("#333");
 	    //variantStyle.setPadding(5, Style.Unit.PX);
 	    variantStyle.setCursor(Style.Cursor.POINTER);
+	    variantStyle.setProperty("touchAction", "none");
 
 	    final MyCommand command = new MyCommand("main", info[i+1]);
 	    final String smallSvg = makeSvg(info[i], 24);
 
-	    // Add click handler to update the main button and execute the command
-	    variantButton.addClickHandler(event -> {
-		// Change the icon of the main button to reflect the variant selected
+	    // Change the icon of the main button to reflect the variant selected
+	    final Runnable selectVariant = () -> {
 		iconLabel.getElement().setInnerHTML(smallSvg);
 		highlightableButtons.remove(mainCommand.getItemName());
                 highlightableButtons.put(command.getItemName(), iconLabel);
 		paletteContainer.setVisible(false);
 		mainCommand.setItemName(command.getItemName());
+	    };
+
+	    // Add click handler to update the main button and execute the command
+	    variantButton.addClickHandler(event -> {
+		selectVariant.run();
 		command.execute();  // Execute the corresponding command for the selected variant
 	    });
+
+	    // pressing and dragging (rather than just clicking) a variant drops that
+	    // variant directly, instead of switching modes
+	    variantButton.addMouseDownHandler(mde -> {
+		if (mde.getNativeButton() == NativeEvent.BUTTON_LEFT) {
+		    selectVariant.run();
+		    UIManager.theUI.mouse.beginToolbarDrag(command.getItemName(), mde.getClientX(), mde.getClientY());
+		}
+	    });
+	    addTouchDragSupport(variantButton.getElement());
+
+	    // while hovering over a variant button, tell the user how to use it
+	    variantButton.addMouseOverHandler(event -> {
+		String label = app.getLabelTextForClass(command.getItemName());
+		if (label != null)
+		    setModeLabel(label + Locale.LS(": Drag And Drop To Create"));
+	    });
+	    variantButton.addMouseOutHandler(event -> UIManager.theUI.updateToolbar());
 
 	    // Append the variant button to the palette container
 	    paletteContainer.add(variantButton);
@@ -293,6 +382,6 @@ public class Toolbar extends HorizontalPanel {
     final String acSrcIcon = "<svg><g transform='translate(-104.09,-66.93) scale(0.266667)'><path fill='none' stroke='currentColor' d=' M 432 336 L 432 313' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 432 279 L 432 256' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 448.66 296 A 16.66 16.66 0 1 1 448.6599916700007 295.98334000277663' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 422 296 L 423 294 L 424 292 L 425 290 L 426 289 L 427 289 L 428 289 L 429 290 L 430 292 L 431 294 L 432 296 L 433 298 L 434 300 L 435 302 L 436 303 L 437 303 L 438 303 L 439 302 L 440 300 L 441 298 L 442 296' stroke-linecap='round' stroke-width='3' /></g></svg>";
     final String opAmpTopIcon = "<svg><g transform='translate(-169.33,-86.13) scale(0.266667)'><path fill='none' stroke='currentColor' d=' M 640 384 L 654 384' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 640 352 L 654 352' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 706 368 L 720 368' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 654 400 L 654 336 L 706 368 Z' stroke-linecap='round' stroke-width='3' /><g><text fill='currentColor' stroke='currentColor' font-family='sans-serif' font-size='14px' font-style='normal' font-weight='normal' text-decoration='normal' x='664' y='382' text-anchor='middle' dominant-baseline='central'>-</text></g><g><text fill='currentColor' stroke='currentColor' font-family='sans-serif' font-size='14px' font-style='normal' font-weight='normal' text-decoration='normal' x='664' y='352' text-anchor='middle' dominant-baseline='central'>+</text></g></g></svg>";
     final String opAmpBotIcon = "<svg><g transform='translate(-169.33,-86.13) scale(0.266667)'><path fill='none' stroke='currentColor' d=' M 640 352 L 654 352' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 640 384 L 654 384' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 706 368 L 720 368' stroke-linecap='round' stroke-width='3' /><path fill='none' stroke='currentColor' d=' M 654 336 L 654 400 L 706 368 Z' stroke-linecap='round' stroke-width='3' /><g><text fill='currentColor' stroke='currentColor' font-family='sans-serif' font-size='14px' font-style='normal' font-weight='normal' text-decoration='normal' x='664' y='350' text-anchor='middle' dominant-baseline='central'>-</text></g><g><text fill='currentColor' stroke='currentColor' font-family='sans-serif' font-size='14px' font-style='normal' font-weight='normal' text-decoration='normal' x='664' y='384' text-anchor='middle' dominant-baseline='central'>+</text></g></g></svg>";
-
+    final String xnorIcon = "<svg><g fill='none' stroke='currentColor' stroke-linecap='round' stroke-width='3'><path stroke-width='1.0909200000000001' d='M1.814 14.909h5.091M1.814 9.09h5.091M6.542 6.909h3.272c4.364 1.09 4.364 1.09 7.273 5.09-2.909 4-2.909 4-7.273 5.092H6.542C7.632 12 7.632 12 6.542 6.909Zm-1.819 0c1.091 5.09 1.091 5.09 0 10.182M19.996 11.98h2.182M19.61 11.98a1.07 1.07 0 1 1 0-.002'/></g></svg>";
 }
 

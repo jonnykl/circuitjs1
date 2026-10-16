@@ -19,11 +19,20 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 class WattmeterElm extends CircuitElm {
     int width;
-    int voltSources[];
+    VoltageSource voltSources[];
     double currents[];
     double curcounts[];
+    int meter; // 0=instantaneous, 1=average
+    final int PM_INST = 0;
+    final int PM_AVG = 1;
+    double avgPower, totalEnergy, cycleTime, lastCycleTime;
+    double runEnergy, runTime, zeroTime, peak, trough;
+    boolean wasAboveMid, haveFullCycle;
 
     public WattmeterElm(int xx, int yy) {
 	super(xx, yy);
@@ -33,26 +42,41 @@ class WattmeterElm extends CircuitElm {
 	    StringTokenizer st) {
 	super(xa, ya, xb, yb, f);
 	width = Integer.parseInt(st.nextToken());
+	try {
+	    meter = Integer.parseInt(st.nextToken());
+	} catch (Exception e) {}
 	setup();
     }
 
     void setup() {
-	voltSources = new int[2];
+	voltSources = new VoltageSource[2];
 	currents = new double[2];
 	curcounts = new double[2];
     }
 
-    String dump() { return super.dump() + " " + width; }
+    String dump() { return super.dump() + " " + width + " " + meter; }
+
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "w", width);
+	XMLSerializer.dumpAttr(elem, "meter", meter);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	width = xml.parseIntAttr("w", width);
+	meter = xml.parseIntAttr("meter", meter);
+	setup();
+    }
 
     int getVoltageSourceCount() { return 2; }
     int getDumpType() { return 420; }
     int getPostCount() { return 4; }
 
     void drag(int xx, int yy) {
-	xx = sim.snapGrid(xx);
-	yy = sim.snapGrid(yy);
-	int w1 = max(sim.gridSize, abs(yy-y));
-	int w2 = max(sim.gridSize, abs(xx-x));
+	xx = snapGrid(xx);
+	yy = snapGrid(yy);
+	int w1 = max(app.gridSize, abs(yy-y));
+	int w2 = max(app.gridSize, abs(xx-x));
 	if (w1 > w2) {
 	    xx = x;
 	    width = w2;
@@ -77,7 +101,7 @@ class WattmeterElm extends CircuitElm {
 	Point p4 = interpPoint(point1, point2, 1, -width*ds);
 	
 	// get stubs
-	int sep = sim.gridSize;
+	int sep = app.gridSize;
 	Point p5 = interpPoint(point1, point2,   sep/dn);
 	Point p6 = interpPoint(point1, point2, 1-sep/dn);
 	Point p7 = interpPoint(p3, p4,   sep/dn);
@@ -115,8 +139,79 @@ class WattmeterElm extends CircuitElm {
 	sim.stampVoltageSource(nodes[2], nodes[3], voltSources[1], 0);
     }
 
-    void setVoltageSource(int j, int vs) {
+    void setVoltageSource(int j, VoltageSource vs) {
 	voltSources[j] = vs;
+	vs.setNodes(nodes[j*2], nodes[j*2+1]);
+    }
+
+    void stepFinished() {
+	double p = getPower();
+	double dt = sim.timeStep;
+	cycleTime += dt;
+	totalEnergy += p * dt;
+	runTime += dt;
+	runEnergy += p * dt;
+
+	// Average over whole cycles, delimited by rising crossings of the long-run mean.
+	// The previous code delimited them by the local extremes of the power waveform,
+	// which is half a period for a sine wave, and for a waveform with a flat section -
+	// such as the output of a half-wave rectifier - gives a window that falls either
+	// side of the conducting part instead of spanning a period.
+	double mid = runEnergy / runTime;
+
+	// Compare against the threshold with hysteresis. While the power is constant it
+	// equals its own running mean, and a bare p > mid then chatters on rounding noise
+	// alone, manufacturing crossings a fraction of a timestep apart. Those leave a
+	// period estimate orders of magnitude too short behind, which the timeout and the
+	// zero check below would then act on.
+	if (p > peak)
+	    peak = p;
+	if (p < trough)
+	    trough = p;
+	double band = (peak - trough) * .05 + Math.abs(peak) * 1e-9;
+	boolean above = wasAboveMid ? p > mid - band : p > mid + band;
+
+	if (above && !wasAboveMid) {
+	    if (haveFullCycle) {
+		avgPower = totalEnergy / cycleTime;
+		if (Double.isNaN(avgPower))
+		    avgPower = 0;
+		lastCycleTime = cycleTime;
+	    } else {
+		// The run up to the first crossing is a partial cycle. Measuring it would
+		// leave a period estimate far shorter than the real one.
+		haveFullCycle = true;
+	    }
+	    totalEnergy = 0;
+	    cycleTime = 0;
+	} else if (lastCycleTime > 0 && cycleTime > lastCycleTime * 8) {
+	    // the waveform stopped or changed shape; don't freeze on a stale reading
+	    avgPower = totalEnergy / cycleTime;
+	    if (Double.isNaN(avgPower))
+		avgPower = 0;
+	    totalEnergy = 0;
+	    cycleTime = 0;
+	}
+	wasAboveMid = above;
+
+	// Constant power never crosses its own mean, so no period is ever measured. Report
+	// the running mean until one is, which is the right answer for DC anyway.
+	if (lastCycleTime == 0)
+	    avgPower = mid;
+
+	// Clear the reading once the power has been off for longer than a period. The
+	// previous code cleared after five zero samples, which a rectified waveform reaches
+	// during every cycle; tying it to the measured period does not.
+	if (p == 0) {
+	    zeroTime += dt;
+	    if (lastCycleTime > 0 && zeroTime > lastCycleTime * 1.5) {
+		avgPower = 0;
+		totalEnergy = 0;
+		cycleTime = 0;
+	    }
+	} else {
+	    zeroTime = 0;
+	}
     }
 
     void draw(Graphics g) {
@@ -130,14 +225,18 @@ class WattmeterElm extends CircuitElm {
 	    drawDots(g, posts[i], inner[i], curcounts[i/2]*flip);
 	    flip *= -1;
 	}
-	
+
         g.setColor(needsHighlight() ? selectColor : lightGrayColor);
 	drawThickPolygon(g, rectPointsX, rectPointsY, 4);
-	
+
 	setBbox(posts[0].x, posts[0].y, posts[3].x, posts[3].y);
 	drawPosts(g);
 
-	String str = getUnitText(getPower(), "W");
+	String str;
+	switch (meter) {
+	case PM_AVG:  str = getUnitText(avgPower, "W(avg)"); break;
+	default:      str = getUnitText(getPower(), "W"); break;
+	}
 	g.save();
 	int fsize = 15;
 	int w;
@@ -157,8 +256,8 @@ class WattmeterElm extends CircuitElm {
 
     double getPower() { return getVoltageDiff()*getCurrent(); }
 
-    void setCurrent(int vn, double c) {
-	currents[vn == voltSources[0] ? 0 : 1] = c;
+    void setCurrent(VoltageSource vs, double c) {
+	currents[vs == voltSources[0] ? 0 : 1] = c;
     }
     double getCurrentIntoNode(int n) {
 	if (n % 2 == 0)
@@ -171,13 +270,32 @@ class WattmeterElm extends CircuitElm {
     boolean hasGroundConnection(int n1) { return false; }
 
     void getInfo(String arr[]) {
-	arr[0] = "wattmeter";
+	arr[0] = "wattmeter (old)";
 	getBasicInfo(arr);
 	arr[3] = "P = " + getUnitText(getPower(), "W");
+	if (meter == PM_AVG)
+	    arr[4] = "Pavg = " + getUnitText(avgPower, "W");
     }
     boolean canViewInScope() { return true; }
     double getCurrent() { return currents[1]; }
     double getVoltageDiff() { return volts[2]-volts[0]; }
     boolean canFlipX() { return false; }
     boolean canFlipY() { return false; }
+
+    public EditInfo getEditInfo(int n) {
+	if (n == 0) {
+	    EditInfo ei = new EditInfo("Value", 0, -1, -1);
+	    ei.choice = new Choice();
+	    ei.choice.add("Instantaneous");
+	    ei.choice.add("Average");
+	    ei.choice.select(meter);
+	    return ei;
+	}
+	return null;
+    }
+
+    public void setEditValue(int n, EditInfo ei) {
+	if (n == 0)
+	    meter = ei.choice.getSelectedIndex();
+    }
 }

@@ -1,6 +1,6 @@
-/*    
+/*
     Copyright (C) Paul Falstad and Iain Sharp
-    
+
     This file is part of CircuitJS1.
 
     CircuitJS1 is free software: you can redistribute it and/or modify
@@ -21,19 +21,23 @@ package com.lushprojects.circuitjs1.client;
 
 import com.google.gwt.storage.client.Storage;
 import com.google.gwt.user.client.Window;
+import com.google.gwt.user.client.ui.Button;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class EditOptions implements Editable {
-	CirSim sim;
-	
-	public EditOptions(CirSim s) { sim = s; }
-	
+	CirSim app;
+	SimulationManager sim;
+
+	public EditOptions(CirSim a, SimulationManager s) { app = a; sim = s; }
+
+	public String getDialogTitle() { return "Other Options"; }
+
 	public EditInfo getEditInfo(int n) {
 		if (n == 0)
-			return new EditInfo("Time step size (s)", sim.maxTimeStep, 0, 0);
+			return new EditInfo("Time step size (s)", sim.maxTimeStep, 0, 0).setPositive();
 		if (n == 1)
 			return new EditInfo("Range for voltage color (V)",
-					CircuitElm.voltageRange, 0, 0);
+					CircuitElm.voltageRange, 0, 0).setPositive();
 		if (n == 2) {
 	            EditInfo ei =  new EditInfo("Change Language", 0, -1, -1);
 	            ei.choice = new Choice();
@@ -43,60 +47,88 @@ class EditOptions implements Editable {
 	            ei.choice.add("Deutsch");
 	            ei.choice.add("English");
 	            ei.choice.add("Español");
+	            ei.choice.add("Suomi");
 	            ei.choice.add("Français");
 	            ei.choice.add("Italiano");
 	            ei.choice.add("Norsk bokmål");
 	            ei.choice.add("Polski");
 	            ei.choice.add("Português");
-	            ei.choice.add("\u0420\u0443\u0441\u0441\u043a\u0438\u0439"); // Russian 
-	            ei.choice.add("\u4e2d\u6587 (\u4e2d\u56fd\u5927\u9646)"); // Chinese 
-	            ei.choice.add("\u4e2d\u6587 (\u53f0\u6e7e)"); // Chinese (tw) 
+	            ei.choice.add("\u0420\u0443\u0441\u0441\u043a\u0438\u0439"); // Russian
+	            ei.choice.add("\u4e2d\u6587 (\u4e2d\u56fd\u5927\u9646)"); // Chinese
+	            ei.choice.add("\u4e2d\u6587 (\u53f0\u6e7e)"); // Chinese (tw)
 	            ei.choice.add("日本語"); // Japanese
+	            ei.choice.add("한국어"); // Korean
 	            return ei;
 		}
-		
+
 		if (n == 3)
-		    return new EditInfo("Positive Color", CircuitElm.positiveColor.getHexValue());
+		    return new EditInfo("Positive Color", CircuitElm.positiveColor.getHexValue()).setIsColor().newColumn();
 		if (n == 4)
-		    return new EditInfo("Negative Color", CircuitElm.negativeColor.getHexValue());
+		    return new EditInfo("Negative Color", CircuitElm.negativeColor.getHexValue()).setIsColor();
 		if (n == 5)
-		    return new EditInfo("Neutral Color", CircuitElm.neutralColor.getHexValue());
+		    return new EditInfo("Neutral Color", CircuitElm.neutralColor.getHexValue()).setIsColor();
 		if (n == 6)
-		    return new EditInfo("Selection Color", CircuitElm.selectColor.getHexValue());
+		    return new EditInfo("Selection Color", CircuitElm.selectColor.getHexValue()).setIsColor();
 		if (n == 7)
-		    return new EditInfo("Current Color", CircuitElm.currentColor.getHexValue());
-		if (n == 8)
-		    return new EditInfo("# of Decimal Digits (short format)", CircuitElm.shortDecimalDigits);
-		if (n == 9)
-		    return new EditInfo("# of Decimal Digits (long format)", CircuitElm.decimalDigits);
-		if (n == 10) {
+		    return new EditInfo("Current Color", CircuitElm.currentColor.getHexValue()).setIsColor();
+		if (n == 8) {
 		    EditInfo ei = new EditInfo("", 0, -1, -1);
-		    ei.checkbox = new Checkbox("Developer Mode", sim.developerMode);
+		    ei.button = new Button(Locale.LS("Reset Colors to Default"));
 		    return ei;
 		}
-		if (n == 11)
-		    return new EditInfo("Minimum Target Frame Rate", sim.minFrameRate);
+		if (n == 9)
+		    return new EditInfo("# of Decimal Digits (short format)", CircuitElm.shortDecimalDigits);
+		if (n == 10)
+		    return new EditInfo("# of Decimal Digits (long format)", CircuitElm.decimalDigits).newColumn();
+		if (n == 11) {
+		    EditInfo ei = new EditInfo("", 0, -1, -1);
+		    ei.checkbox = new Checkbox("Developer Mode", app.developerMode);
+		    return ei;
+		}
 		if (n == 12)
-		    return new EditInfo("Mouse Wheel Sensitivity", sim.wheelSensitivity);
-		if (n == 13) {
+		    return new EditInfo("Minimum Target Frame Rate", app.minFrameRate).setPositive();
+		if (n == 13)
+		    return new EditInfo("Mouse Wheel Sensitivity", app.mouse.wheelSensitivity).setPositive();
+		if (n == 14) {
+		   EditInfo ei = new EditInfo("", 0, -1, -1);
+		   ei.checkbox = new Checkbox("Auto-Run DC Operating Point on Reset", app.autoDCOnReset);
+		   return ei;
+		}
+		if (n == 15) {
 		    EditInfo ei = new EditInfo("", 0, -1, -1);
 		    ei.checkbox = new Checkbox("Auto-Adjust Timestep", sim.adjustTimeStep);
 		    return ei;
 		}
-		if (n == 14 && sim.adjustTimeStep)
-		    return new EditInfo("Minimum time step size (s)", sim.minTimeStep, 0, 0);
+		if (n == 16) {
+		    EditInfo ei = new EditInfo("Matrix Solver", 0, -1, -1);
+		    ei.choice = new Choice();
+		    ei.choice.add(Locale.LS("Auto"));
+		    ei.choice.add(Locale.LS("Dense (Crout's LU)"));
+		    ei.choice.add(Locale.LS("Sparse (CSC LU)"));
+		    ei.choice.select(sim.solverType);
+		    return ei;
+		}
+		if (n == 17)
+		    return new EditInfo("Value Label Font Size", CircuitElm.valueFontSize);
+
+		// add new options here (before the adjustTimeStep conditional below)
+
+		if (n == 18 && sim.adjustTimeStep)
+		    return new EditInfo("Minimum time step size (s)", sim.minTimeStep, 0, 0).setPositive();
+
+		// do not add new options here because they will be hidden unless adjustTimeStep is set
 
 		return null;
 	}
-	
+
 	public void setEditValue(int n, EditInfo ei) {
-		if (n == 0 && ei.value > 0) {
+		if (n == 0) {
 			sim.maxTimeStep = ei.value;
 
 			// if timestep changed manually, prompt before changing it again
 			AudioOutputElm.okToChangeTimeStep = false;
 		}
-		if (n == 1 && ei.value > 0)
+		if (n == 1)
 			CircuitElm.voltageRange = ei.value;
 		if (n == 2) {
 		    	int lang = ei.choice.getSelectedIndex();
@@ -110,15 +142,17 @@ class EditOptions implements Editable {
 		    	case 3: langString = "de"; break;
 		    	case 4: langString = "en"; break;
 		    	case 5: langString = "es"; break;
-		    	case 6: langString = "fr"; break;
-		    	case 7: langString = "it"; break;
-		    	case 8: langString = "nb"; break;
-		    	case 9: langString = "pl"; break;
-			case 10: langString = "pt"; break;
-		    	case 11: langString = "ru"; break;
-		    	case 12: langString = "zh"; break;
-		    	case 13: langString = "zh-tw"; break;
-		    	case 14: langString = "ja"; break;
+		    	case 6: langString = "fi"; break;
+		    	case 7: langString = "fr"; break;
+		    	case 8: langString = "it"; break;
+		    	case 9: langString = "nb"; break;
+		    	case 10: langString = "pl"; break;
+			case 11: langString = "pt"; break;
+		    	case 12: langString = "ru"; break;
+		    	case 13: langString = "zh"; break;
+		    	case 14: langString = "zh-tw"; break;
+		    	case 15: langString = "ja"; break;
+		    	case 16: langString = "kr"; break;
 		    	}
 		    	if (langString == null)
 		    	    return;
@@ -147,28 +181,59 @@ class EditOptions implements Editable {
 		    CircuitElm.selectColor = setColor("selectColor", ei, Color.cyan);
 		if (n == 7)
 		    CircuitElm.currentColor = setColor("currentColor", ei, Color.yellow);
-		if (n == 8)
-		    CircuitElm.setDecimalDigits((int)ei.value, true, true);
+		if (n == 8) {
+		    // Reset all colors to defaults
+		    Storage stor = Storage.getLocalStorageIfSupported();
+		    if (stor != null) {
+			stor.removeItem("positiveColor");
+			stor.removeItem("negativeColor");
+			stor.removeItem("neutralColor");
+			stor.removeItem("selectColor");
+			stor.removeItem("currentColor");
+		    }
+		    app.ui.setColors(null, null, null, null, null);
+		    ei.newDialog = true;
+		}
 		if (n == 9)
-		    CircuitElm.setDecimalDigits((int)ei.value, false, true);
+		    CircuitElm.setDecimalDigits((int)ei.value, true, true);
 		if (n == 10)
-	            sim.developerMode = ei.checkbox.getState();
-		if (n == 11 && ei.value > 0)
-		    sim.minFrameRate = ei.value;
-		if (n == 12 && ei.value > 0) {
-		    sim.wheelSensitivity = ei.value;
+		    CircuitElm.setDecimalDigits((int)ei.value, false, true);
+		if (n == 11)
+	            app.developerMode = ei.checkbox.getState();
+		if (n == 12)
+		    app.minFrameRate = ei.value;
+		if (n == 13) {
+		    app.mouse.wheelSensitivity = ei.value;
 		    Storage stor = Storage.getLocalStorageIfSupported();
 		    if (stor != null)
-			stor.setItem("wheelSensitivity", Double.toString(sim.wheelSensitivity));
+			stor.setItem("wheelSensitivity", Double.toString(app.mouse.wheelSensitivity));
 		}
-		if (n == 13) {
+                if (n == 14)
+                    app.autoDCOnReset = ei.checkbox.getState();
+		if (n == 15) {
 		    sim.adjustTimeStep = ei.checkbox.getState();
 		    ei.newDialog = true;
 		}
-		if (n == 14 && ei.value > 0)
+		if (n == 16) {
+		    int newType = ei.choice.getSelectedIndex();
+		    if (newType != sim.solverType) {
+			sim.solverType = newType;
+			/*
+			// Save as default for new circuits; existing circuit will persist its own
+			// solverType via the "st" XML attr when saved.
+			Storage stor = Storage.getLocalStorageIfSupported();
+			if (stor != null)
+			    stor.setItem("solverType", Integer.toString(sim.solverType));
+			*/
+			app.needAnalyze();
+		    }
+		}
+		if (n == 17)
+		    CircuitElm.setValueFontSize(ei.value > 0 ? (int) ei.value : 12);
+		if (n == 18 && ei.value > 0)
 		    sim.minTimeStep = ei.value;
 	}
-	
+
 	Color setColor(String name, EditInfo ei, Color def) {
 	    String val = ei.textf.getText();
 	    if (val.length() == 0)

@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class Counter2Elm extends ChipElm {
@@ -40,7 +43,22 @@ class Counter2Elm extends ChipElm {
 	    return super.dump() + " " + modulus;
 	}
 
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "mo", modulus);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    modulus = xml.parseIntAttr("mo", modulus);
+
+	    // avoid clearing on first iteration
+	    pins[clr].value = true;
+	    volts[clr] = highVoltage;
+	}
+
 	boolean needsBits() { return true; }
+	boolean allowBus() { return true; }
 	String getChipName() {
 	    if (modulus == 0)
 		return "Counter";
@@ -51,17 +69,11 @@ class Counter2Elm extends ChipElm {
 	
 	void setupPins() {
 	    sizeX = 2;
-	    sizeY = bits+3;
+	    int bitsY = useBus() ? 1 : bits;
+	    sizeY = bitsY+3;
 	    pins = new Pin[getPostCount()];
-	    int i;
-	    for (i = 0; i != bits; i++) {
-		pins[i] = new Pin(i+1, SIDE_E, "Q" + (bits-i-1));
-		pins[i].output = pins[i].state = true;
-	    }
-	    for (i = 0; i != bits; i++) {
-		int ii = i+bits;
-		pins[ii] = new Pin(i+1, SIDE_W, "I" + (bits-i-1));
-	    }
+	    makeBitPins(bits, 1, SIDE_E, 0, "Q", true, true, true);
+	    makeBitPins(bits, 1, SIDE_W, bits, "I", false, false, true);
 	    int p = bits*2;
 	    clk = p;
 	    clr = p+1;
@@ -71,14 +83,14 @@ class Counter2Elm extends ChipElm {
 	    ent = p+5;
 	    pins[clk] = new Pin(0, SIDE_W, "");
 	    pins[clk].clock = true;
-	    pins[clr] = new Pin(bits+1, SIDE_W, "CLR");
+	    pins[clr] = new Pin(bitsY+1, SIDE_W, "CLR");
 	    pins[clr].bubble = true;
-	    pins[enp] = new Pin(bits+2, SIDE_W, "EnP");
+	    pins[enp] = new Pin(bitsY+2, SIDE_W, "EnP");
 	    pins[rco] = new Pin(0, SIDE_E, "RCO");
 	    pins[rco].output = true;
-	    pins[load] = new Pin(bits+1, SIDE_E, "LOAD");
+	    pins[load] = new Pin(bitsY+1, SIDE_E, "LOAD");
 	    pins[load].bubble = true;
-	    pins[ent] = new Pin(bits+2, SIDE_E, "EnT");
+	    pins[ent] = new Pin(bitsY+2, SIDE_E, "EnT");
 	}
 	int getPostCount() {
 	    return bits*2+6;
@@ -91,11 +103,14 @@ class Counter2Elm extends ChipElm {
 	    return null;
 	}
 	public void setChipEditValue(int n, EditInfo ei) {
-	    if (n == 0 && ei.value >= 2) {
-		bits = (int)ei.value;
-		setupPins();
-		setPoints();
-		allocNodes();
+	    if (n == 0) {
+		if (ei.value >= 2) {
+		    bits = (int)ei.value;
+		    setupPins();
+		    setPoints();
+		    allocNodes();
+		} else
+		    ei.setError("must be >= 2");
 	    }
 	    if (n == 1)
 		modulus = (int)ei.value;
@@ -157,4 +172,5 @@ class Counter2Elm extends ChipElm {
 	    writeOutput(rco, carry && pins[ent].value);
 	}
 	int getDumpType() { return 421; }
+	String getXmlDumpType() { return "ctr2"; }
     }

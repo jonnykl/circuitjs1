@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import java.util.Vector;
 
 import com.google.gwt.user.client.Window;
@@ -85,10 +88,6 @@ class DiodeElm extends CircuitElm {
     int getDumpType() { return 'd'; }
     String dump() {
 	flags |= FLAG_MODEL;
-/*	if (modelName == null) {
-	    sim.console("model name is null??");
-	    modelName = "default";
-	}*/
 	return super.dump() + " " + CustomLogicModel.escape(modelName);
     }
     
@@ -97,7 +96,25 @@ class DiodeElm extends CircuitElm {
 	    return null;
 	return model.dump();
     }
-    
+
+    void dumpXmlModel(Document doc) {
+	if (!(model.builtIn || model.dumped))
+	    model.dumpXml(doc);
+    }
+
+    void dumpXml(Document doc, Element elem) {
+	if (!(model.builtIn || model.dumped))
+	    model.dumpXml(doc);
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "mo", modelName);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        modelName = xml.parseStringAttr("mo", modelName);
+	setup();
+    }
+
     final int hs = 8;
     Polygon poly;
     Point cathode[];
@@ -112,6 +129,8 @@ class DiodeElm extends CircuitElm {
 	poly = createPolygon(pa[0], pa[1], lead2);
     }
 	
+    void addRoutingObstacle(WireRouter router) { addRoutingObstacleWithLeads(router, hs); }
+
     void draw(Graphics g) {
 	drawDiode(g);
 	doDots(g);
@@ -160,6 +179,7 @@ class DiodeElm extends CircuitElm {
     void calculateCurrent() {
 	current = diode.calculateCurrent(volts[0]-volts[diodeEndNode]);
     }
+    String getElmType() { return "diode"; }
     void getInfo(String arr[]) {
 	if (model.oldStyle)
 	    arr[0] = "diode";
@@ -227,7 +247,7 @@ class DiodeElm extends CircuitElm {
             newModel.setSimple(n == 1);
             if (newModel.isSimple())
         	newModel.setForwardVoltage();
-            EditDialog editDialog = new EditDiodeModelDialog(newModel, sim, this);
+            EditDialog editDialog = new EditDiodeModelDialog(newModel, app, this);
             CirSim.diodeModelEditDialog = editDialog;
             editDialog.show();
             return;
@@ -240,7 +260,7 @@ class DiodeElm extends CircuitElm {
             }
             if (model.isSimple())
         	model.setForwardVoltage();            
-            EditDialog editDialog = new EditDiodeModelDialog(model, sim, null);
+            EditDialog editDialog = new EditDiodeModelDialog(model, app, null);
             CirSim.diodeModelEditDialog = editDialog;
             editDialog.show();
             return;

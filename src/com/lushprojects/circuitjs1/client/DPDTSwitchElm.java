@@ -19,7 +19,10 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class DPDTSwitchElm extends SwitchElm {
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class DPDTSwitchElm extends SwitchElm {
 	int poleCount;
 	
 	public DPDTSwitchElm(int xx, int yy) {
@@ -41,27 +44,46 @@ package com.lushprojects.circuitjs1.client;
 	    noDiagonal = true;
 	}
 	int getDumpType() { return 429; }
+	String getXmlDumpType() { return "dpdt"; }
 	String dump() {
 	    return super.dump() + " " + poleCount;
+	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "po", poleCount);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    poleCount = xml.parseIntAttr("po", poleCount);
 	}
 
 	final int openhs = 16;
 	final int posCount = 2;
 	Point poleLeads[], throwLeads[], polePosts[], throwPosts[], linePoints[];
-        int voltageSources[];
+        VoltageSource voltageSources[];
         double currents[], curcounts[];
+
+	// voltageSources/currents/curcounts are normally (re)allocated in setPoints(), but elements
+	// inside a CompositeElm/subcircuit never get setPoints() called, so allocate lazily here too.
+	void ensureArrays() {
+	    if (voltageSources == null || voltageSources.length != poleCount) {
+		voltageSources = new VoltageSource[poleCount];
+		currents = new double[poleCount];
+		curcounts = new double[poleCount];
+	    }
+	}
 
 	void setPoints() {
 	    super.setPoints();
 	    calcLeads(32);
-	    voltageSources = new int[poleCount];
+	    ensureArrays();
 	    throwPosts = newPointArray(2*poleCount);
 	    throwLeads = newPointArray(4*poleCount);
 	    poleLeads = newPointArray(poleCount);
 	    polePosts = newPointArray(poleCount);
 	    linePoints = newPointArray(2);
-	    currents = new double[poleCount];
-	    curcounts = new double[poleCount];
 	    int i;
 	    for (i = 0; i != poleCount; i++) {
 		int offset = -i*openhs*3;
@@ -131,10 +153,10 @@ package com.lushprojects.circuitjs1.client;
 	    return 0;
 	}
 
-	void setCurrent(int vn, double c) {
+	void setCurrent(VoltageSource vs, double c) {
 	    int i;
 	    for (i = 0; i != poleCount; i++)
-		if (vn == voltageSources[i])
+		if (vs == voltageSources[i])
 		    currents[i] = c;
 	}
 	Rectangle getSwitchRect() {
@@ -150,31 +172,45 @@ package com.lushprojects.circuitjs1.client;
 	}
 	int getPostCount() { return 3*poleCount; }
 	void calculateCurrent() {
+	    if (resistance > 0)
+		for (int i = 0; i != poleCount; i++)
+		    currents[i] = (volts[i*3] - volts[i*3+1+position]) / resistance;
 	}
-	
-        void setVoltageSource(int j, int vs) {
+
+        void setVoltageSource(int j, VoltageSource vs) {
+            ensureArrays();
             voltageSources[j] = vs;
+            vs.setNodes(nodes[j*3], nodes[position+1+j*3]);
         }
 
 	void stamp() {
+	    ensureArrays();
 	    int i;
-	    for (i = 0; i != poleCount; i++)
-		sim.stampVoltageSource(nodes[i*3], nodes[position+1+i*3], voltageSources[i], 0);
+	    for (i = 0; i != poleCount; i++) {
+		if (resistance > 0)
+		    sim.stampResistor(nodes[i*3], nodes[position+1+i*3], resistance);
+		else
+		    sim.stampVoltageSource(voltageSources[i], 0);
+	    }
 	}
-		
+
 	int getVoltageSourceCount() {
-	    return poleCount;
+	    return resistance > 0 ? 0 : poleCount;
 	}
 	
 	boolean getConnection(int n1, int n2) {
-	    return comparePair(n1, n2, 0, 1+position) || comparePair(n1, n2, 3, 4+position);
+	    for (int i = 0; i != poleCount; i++)
+		if (comparePair(n1, n2, i*3, i*3+1+position))
+		    return true;
+	    return false;
 	}
 	
-	boolean isWireEquivalent() { return true; }
+	boolean isWireEquivalent() { return resistance == 0; }
 	
 	// optimizing out this element is too complicated to be worth it (see #646)
 	boolean isRemovableWire() { return false; }
 
+	String getElmType() { return "switch (DPDT)"; }
 	void getInfo(String arr[]) {
 	    arr[0] = (poleCount == 2) ? "switch (DPDT)" : "switch (" + poleCount + "PDT)";
 	    int i;
@@ -187,18 +223,32 @@ package com.lushprojects.circuitjs1.client;
 	    	return new EditInfo("# of Poles", poleCount, 2, 10).setDimensionless();
 	    if (n == 1)
 		return EditInfo.createCheckbox("IEC Symbol", useIECSymbol());
+	    if (n == 2)
+		return getKeyShortcutEditInfo();
+	    if (n == 3) {
+		EditInfo ei = new EditInfo("On Resistance (ohms)", resistance);
+		ei.setNonNegative();
+		return ei;
+	    }
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
-	    if (n == 0 && ei.value >= 2) {
-		poleCount = (int) ei.value;
-		allocNodes();
-		setPoints();
+	    if (n == 0) {
+		if (ei.value >= 2) {
+		    poleCount = (int) ei.value;
+		    allocNodes();
+		    setPoints();
+		} else
+		    ei.setError("must be >= 2");
 	    }
 	    if (n == 1) {
 		flags = ei.changeFlag(flags, FLAG_IEC);
 		setPoints();
 	    }
+	    if (n == 2)
+		setKeyShortcutEditValue(ei);
+	    if (n == 3)
+		resistance = ei.value;
 	}
 	
 	int getShortcut() { return 0; }
@@ -225,4 +275,19 @@ package com.lushprojects.circuitjs1.client;
 	    flip();
 	    super.flipXY(c2, count);
 	}
+
+        boolean validate() {
+	    if (resistance > 0)
+		return true;
+            int i;
+	    for (i = 0; i != poleCount; i++) {
+		FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(i*3), sim);
+		if (fpi.findPath(getNode(i*3+1+position))) {
+		    //sim.stop("Voltage source/wire loop with no resistance!", this);
+		    resistance = .001;
+		    return false;
+		}
+	    }
+	    return true;
+        }
     }

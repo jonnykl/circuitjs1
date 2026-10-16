@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 class ScopeElm extends CircuitElm {
     
     Scope elmScope;
@@ -28,7 +31,7 @@ class ScopeElm extends CircuitElm {
 	noDiagonal=false;
 	x2=x+128;
 	y2=y+64;
-	elmScope = new Scope(sim);
+	elmScope = new Scope(app, sim);
 	setPoints();
     }
     
@@ -43,17 +46,17 @@ class ScopeElm extends CircuitElm {
 	noDiagonal=false;
 	String sStr = st.nextToken();
 	StringTokenizer sst = new StringTokenizer(sStr, "_");
-	elmScope = new Scope(sim);
+	elmScope = new Scope(app, sim);
 	elmScope.undump(sst);
 	setPoints();
 	elmScope.resetGraph();
     }
     
     public void setScopeRect() {
-	int i1 = sim.transformX(min(x,x2));
-	int i2 = sim.transformX(max(x,x2));
-	int j1 = sim.transformY(min(y,y2));
-	int j2 = sim.transformY(max(y,y2));
+	int i1 = app.mouse.transformX(min(x,x2));
+	int i2 = app.mouse.transformX(max(x,x2));
+	int j1 = app.mouse.transformY(min(y,y2));
+	int j2 = app.mouse.transformY(max(y,y2));
 	Rectangle r = new Rectangle(i1,j1,i2-i1, j2-j1);
 	if (!r.equals(elmScope.rect))
 	    elmScope.setRect(r);
@@ -86,22 +89,29 @@ class ScopeElm extends CircuitElm {
     
     int getDumpType() { return 403; }
 
-    public String dump() {
-	String dumpStr = super.dump();
-	String elmDump = elmScope.dump();
-	if (elmDump == null)
-	    return null;
-	String sStr = elmDump.replace(' ', '_');
-	sStr = sStr.replaceFirst("o_", ""); // remove unused prefix for embedded Scope
-	return dumpStr + " " + sStr;
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	elmScope.dumpXml(doc, elem);
     }
-    
+
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	for (Element child : xml.getChildElements()) {
+	    if (child.getTagName().equals("o")) {
+		xml.parseChildElement(child);
+		elmScope.undumpXml(xml);
+		break;
+	    }
+	}
+	elmScope.resetGraph();
+    }
+
     void draw(Graphics g) {
 	g.setColor(needsHighlight() ? selectColor : whiteColor);
 	g.context.save();
 	// setTransform() doesn't work in version of canvas2svg we are using
-	g.context.scale(1/sim.transform[0], 1/sim.transform[3]);
-	g.context.translate(-sim.transform[4], -sim.transform[5]);
+	g.context.scale(1/app.transform[0], 1/app.transform[3]);
+	g.context.translate(-app.transform[4], -app.transform[5]);
 	//g.context.scale(CirSim.devicePixelRatio(), CirSim.devicePixelRatio());
 
 	setScopeRect();

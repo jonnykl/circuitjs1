@@ -20,6 +20,8 @@
 package com.lushprojects.circuitjs1.client;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 class LEDElm extends DiodeElm {
 	double colorR, colorG, colorB, maxBrightnessCurrent;
@@ -51,9 +53,19 @@ class LEDElm extends DiodeElm {
 	    } catch (Exception e) { }
 	}
 	int getDumpType() { return 162; }
-	String dump() {
-	    return super.dump() + " " + colorR + " " + colorG + " " + colorB + " " +
-		    maxBrightnessCurrent;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "cr", colorR);
+	    XMLSerializer.dumpAttr(elem, "cg", colorG);
+	    XMLSerializer.dumpAttr(elem, "cb", colorB);
+	    XMLSerializer.dumpAttr(elem, "mbc", maxBrightnessCurrent);
+	}
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    colorR = xml.parseDoubleAttr("cr", colorR);
+	    colorG = xml.parseDoubleAttr("cg", colorG);
+	    colorB = xml.parseDoubleAttr("cb", colorB);
+	    maxBrightnessCurrent = xml.parseDoubleAttr("mbc", maxBrightnessCurrent);
 	}
 
 	Point ledLead1, ledLead2, ledCenter;
@@ -66,7 +78,7 @@ class LEDElm extends DiodeElm {
 	}
 	
 	void draw(Graphics g) {
-	    if (needsHighlight() || this == sim.dragElm) {
+	    if (needsHighlight() || isCreating()) {
 		super.draw(g);
 		return;
 	    }
@@ -97,6 +109,7 @@ class LEDElm extends DiodeElm {
 	    drawPosts(g);
 	}
 
+	String getElmType() { return "LED"; }
 	void getInfo(String arr[]) {
 	    super.getInfo(arr);
 	    if (model.oldStyle)

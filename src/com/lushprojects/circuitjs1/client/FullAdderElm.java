@@ -1,6 +1,6 @@
-/*    
+/*
     Copyright (C) Paul Falstad and Iain Sharp
-    
+
     This file is part of CircuitJS1.
 
     CircuitJS1 is free software: you can redistribute it and/or modify
@@ -34,27 +34,24 @@ package com.lushprojects.circuitjs1.client;
 	    setupPins();
 	}
 	static final int FLAG_BITS = 2;
-	
+
 	String getChipName() { return "Adder"; }
 	int carryIn, carryOut;
 
 	void setupPins() {
 	    sizeX=2;
-	    sizeY=bits*2+1;
+	    int bitsY = useBus() ? 1 : bits;
+	    sizeY=bitsY*2+1;
 	    pins=new Pin[getPostCount()];
 
-	    int i;
-	    for (i = 0; i != bits; i++) {
-		pins[i       ] = new Pin(bits-1-i, SIDE_W, "A" + i);
-		pins[i+bits  ] = new Pin(bits-1-i+bits, SIDE_W, "B" + i);
-		pins[i+bits*2] = new Pin(bits-1-i+2, SIDE_E, "S" + i);
-		pins[i+bits*2].output=true;
-	    }
+	    makeBitPins(bits, 0,       SIDE_W, 0,      "A", false, false, false);
+	    makeBitPins(bits, bitsY,   SIDE_W, bits,    "B", false, false, false);
+	    makeBitPins(bits, 2,       SIDE_E, bits*2,  "S", true,  false, false);
 	    carryIn = bits*3;
 	    carryOut = bits*3+1;
 	    pins[carryOut] = new Pin(0, SIDE_E, "C");
 	    pins[carryOut].output=true;
-	    pins[carryIn] = new Pin(bits*2, SIDE_W, "Cin");
+	    pins[carryIn] = new Pin(bitsY*2, SIDE_W, "Cin");
 	    allocNodes();
 	}
 	int getPostCount() {
@@ -74,14 +71,15 @@ package com.lushprojects.circuitjs1.client;
 	}
 	int getDumpType() { return 196; }
 	boolean needsBits() { return (flags & FLAG_BITS) != 0; }
+	boolean allowBus() { return needsBits(); }
 
         public EditInfo getChipEditInfo(int n) {
             if (n == 0)
-                return new EditInfo("# of Bits", bits, 1, 1).setDimensionless();
+                return new EditInfo("# of Bits", bits, 1, 1).setDimensionless().setPositive();
             return super.getChipEditInfo(n);
         }
         public void setChipEditValue(int n, EditInfo ei) {
-            if (n == 0 && ei.value > 0) {
+            if (n == 0) {
                 bits = (int)ei.value;
                 flags |= FLAG_BITS;
                 setupPins();

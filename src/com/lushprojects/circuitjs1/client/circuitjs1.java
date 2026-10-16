@@ -36,13 +36,13 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 
 public class circuitjs1 implements EntryPoint {
 
-    public static final String versionString = "3.1.3js";
+    public static final String versionString = "4.1.5.1js";
 
     // Set to true if the server runs the shortrelay.php file in the same directory
     // as the circuit simulator
     public static final boolean shortRelaySupported = true;
 
-    static CirSim mysim;
+    static CirSim theApp;
 
     // This is the program entrypoint! 
     // Called by gtw automagically (see circuitjs1.gwt.xml)
@@ -178,17 +178,17 @@ public class circuitjs1 implements EntryPoint {
 
     public void loadSimulator(HashMap<String, String> localizationMap) {
         Locale.localizationMap = localizationMap;
-        mysim = new CirSim();
-        mysim.init();
+        theApp = new CirSim();
+        theApp.init();
 
         Window.addResizeHandler(new ResizeHandler() {
             public void onResize(ResizeEvent event) {
-                mysim.setCanvasSize();
-                mysim.setiFrameHeight();
+                theApp.ui.setCanvasSize();
+                theApp.setiFrameHeight();
             }
         });
 
-        mysim.updateCircuit();
+        theApp.updateCircuit();
     }
 
 }

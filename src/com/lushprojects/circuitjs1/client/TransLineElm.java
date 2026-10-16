@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class TransLineElm extends CircuitElm {
@@ -47,14 +50,31 @@ class TransLineElm extends CircuitElm {
     int getDumpType() { return 171; }
     int getPostCount() { return 4; }
     int getInternalNodeCount() { return 2; }
+    String getXmlDumpType() { return "tl"; }
     String dump() {
 	return super.dump() + " " + delay + " " + imped + " " + width + " " + 0.;
     }
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "de", delay);
+        XMLSerializer.dumpAttr(elem, "im", imped);
+        XMLSerializer.dumpAttr(elem, "wi", width);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        delay = xml.parseDoubleAttr("de", delay);
+        imped = xml.parseDoubleAttr("im", imped);
+        width = xml.parseIntAttr("wi", width);
+	reset();
+    }
+
     void drag(int xx, int yy) {
-	xx = sim.snapGrid(xx);
-	yy = sim.snapGrid(yy);
-	int w1 = max(sim.gridSize, abs(yy-y));
-	int w2 = max(sim.gridSize, abs(xx-x));
+	xx = snapGrid(xx);
+	yy = snapGrid(yy);
+	int w1 = max(app.gridSize, abs(yy-y));
+	int w2 = max(app.gridSize, abs(xx-x));
 	if (w1 > w2) {
 	    xx = x;
 	    width = w2;
@@ -88,7 +108,7 @@ class TransLineElm extends CircuitElm {
 	int ds = (dy == 0) ? sign(dx) : -sign(dy);
 	Point p3 = interpPoint(point1, point2, 0, -width*ds);
 	Point p4 = interpPoint(point1, point2, 1, -width*ds);
-	int sep = sim.gridSize/2;
+	int sep = app.gridSize/2;
 	Point p5 = interpPoint(point1, point2, 0, -(width/2-sep)*ds);
 	Point p6 = interpPoint(point1, point2, 1, -(width/2-sep)*ds);
 	Point p7 = interpPoint(point1, point2, 0, -(width/2+sep)*ds);
@@ -133,7 +153,7 @@ class TransLineElm extends CircuitElm {
 
 	curCount1 = updateDotCount(-current1, curCount1);
 	curCount2 = updateDotCount(current2, curCount2);
-	if (sim.dragElm != this) {
+	if (!isCreating()) {
 	    drawDots(g, posts[0], inner[0], curCount1);
 	    drawDots(g, posts[2], inner[2], -curCount1);
 	    drawDots(g, posts[1], inner[1], -curCount2);
@@ -141,16 +161,19 @@ class TransLineElm extends CircuitElm {
 	}
     }
 
-    int voltSource1, voltSource2;
+    VoltageSource voltSource1, voltSource2;
     double current1, current2, curCount1, curCount2;
-    void setVoltageSource(int n, int v) {
-	if (n == 0)
+    void setVoltageSource(int n, VoltageSource v) {
+	if (n == 0) {
 	    voltSource1 = v;
-	else
+	    v.setNodes(nodes[4], nodes[0]);
+	} else {
 	    voltSource2 = v;
+	    v.setNodes(nodes[5], nodes[1]);
+	}
     }
-    void setCurrent(int v, double c) {
-	if (v == voltSource1)
+    void setCurrent(VoltageSource vs, double c) {
+	if (vs == voltSource1)
 	    current1 = c;
 	else
 	    current2 = c;
@@ -206,12 +229,13 @@ class TransLineElm extends CircuitElm {
     boolean hasGroundConnection(int n1) { return false; }
     boolean getConnection(int n1, int n2) {
 	return false;
-	/*if (comparePair(n1, n2, 0, 1))
-	  return true;
-	  if (comparePair(n1, n2, 2, 3))
-	  return true;
-	  return false;*/
     }
+
+    boolean getMatrixConnection(int n1, int n2) {
+	// odd nodes == right side, even nodes == left side
+	return ((n1 % 2) == (n2 % 2));
+    }
+
     void getInfo(String arr[]) {
 	arr[0] = "transmission line";
 	arr[1] = getUnitText(imped, Locale.ohmString);
@@ -221,9 +245,9 @@ class TransLineElm extends CircuitElm {
     }
     public EditInfo getEditInfo(int n) {
 	if (n == 0)
-	    return new EditInfo("Delay (s)", delay, 0, 0);
+	    return new EditInfo("Delay (s)", delay, 0, 0).setPositive();
 	if (n == 1)
-	    return new EditInfo("Impedance (ohms)", imped, 0, 0);
+	    return new EditInfo("Impedance (ohms)", imped, 0, 0).setPositive();
 	return null;
     }
     public void setEditValue(int n, EditInfo ei) {

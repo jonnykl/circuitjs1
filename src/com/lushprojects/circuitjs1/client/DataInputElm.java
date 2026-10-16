@@ -25,6 +25,7 @@ import com.google.gwt.dom.client.Element;
 import com.google.gwt.event.dom.client.ChangeEvent;
 import com.google.gwt.event.dom.client.ChangeHandler;
 import com.google.gwt.user.client.ui.FileUpload;
+import com.google.gwt.user.client.Window;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class DataFileEntry {
@@ -68,20 +69,36 @@ class DataInputElm extends RailElm {
 	
 	double fmphase;
 	
-	String dump() {
-	    // add a file number to the dump so we can preserve the data when doing cut and paste, or undo/redo.
-	    // we don't save the entire file in the dump because it would be huge.
+	void dumpXml(com.google.gwt.xml.client.Document doc, com.google.gwt.xml.client.Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "sl", sampleLength);
+	    XMLSerializer.dumpAttr(elem, "sf", scaleFactor);
+	}
+	void dumpXmlState(com.google.gwt.xml.client.Document doc, com.google.gwt.xml.client.Element elem) {
 	    if (data != null) {
+		// add a file number to the dump so we can preserve the data when doing cut and paste, or undo/redo.
+		// we don't save the entire file in the dump because it would be huge.
 		if (fileNum == 0)
 		    fileNum = fileNumCounter++;
 		DataFileEntry ent = new DataFileEntry();
 		ent.fileName = fileName;
 		ent.data = data;
 		dataFileMap.put(fileNum, ent);
+		XMLSerializer.dumpAttr(elem, "fn", fileNum);
 	    }
-	    return super.dump() + " " + sampleLength + " " + scaleFactor + " " + fileNum;
 	}
-	
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    sampleLength = xml.parseDoubleAttr("sl", sampleLength);
+	    scaleFactor = xml.parseDoubleAttr("sf", scaleFactor);
+	    fileNum = xml.parseIntAttr("fn", 0);
+	    DataFileEntry ent = dataFileMap.get(fileNum);
+	    if (ent != null) {
+		fileName = ent.fileName;
+		data = ent.data;
+	    }
+	}
+
 	void reset() {
 	    timeOffset = 0;
 	}
@@ -97,9 +114,11 @@ class DataInputElm extends RailElm {
 	boolean doesRepeat() { return (flags & FLAG_REPEAT) != 0; }
 	
 	double getVoltage() {
-	    if (data == null)
+	    if (data == null || data.size() == 0)
 		return 0;
 	    int ptr = (int) (timeOffset / sampleLength);
+	    if (ptr < 0)
+		ptr = 0;
 	    if (ptr >= data.size()) {
 		if (doesRepeat()) {
 		    ptr = 0;
@@ -168,11 +187,12 @@ class DataInputElm extends RailElm {
             String arr[] = s.split("\r*\n");
             data = new ArrayList<Double>();
             int i;
+            boolean parseError = false;
             for (i = 0; i != arr.length; i++) {
         	// skip blank lines
         	if (arr[i].length() == 0)
         	    continue;
-        	
+
         	// skip comments
         	if (arr[i].charAt(0) == '#')
         	    continue;
@@ -181,7 +201,17 @@ class DataInputElm extends RailElm {
         	    data.add(d);
         	} catch (Exception e) {
         	    CirSim.console("parse error on line " + i);
+        	    parseError = true;
         	}
+            }
+            if (data.size() == 0 || parseError) {
+        	String msg = parseError ? "Error parsing data file.\n\n" : "No data found in file.\n\n";
+        	msg += "Expected format:\n" +
+        	    "- One numeric voltage value per line\n" +
+        	    "- Lines starting with # are treated as comments\n" +
+        	    "- Blank lines are ignored\n\n" +
+        	    "Example:\n# my data\n1.5\n2.3\n-0.5";
+        	Window.alert(msg);
             }
 	}
 

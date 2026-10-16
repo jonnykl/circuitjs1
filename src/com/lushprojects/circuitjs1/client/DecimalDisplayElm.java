@@ -19,9 +19,13 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 class DecimalDisplayElm extends ChipElm {
     int bitCount;
-    
+    int displayMode; // 0=decimal, 1=hex, 2=octal
+
     public DecimalDisplayElm(int xx, int yy) {
 	super(xx, yy);
 	bitCount = 4;
@@ -33,10 +37,17 @@ class DecimalDisplayElm extends ChipElm {
 	bitCount = 4;
 	try {
 	    bitCount = Integer.parseInt(st.nextToken());
+	    displayMode = Integer.parseInt(st.nextToken());
 	} catch (Exception e) {}
 	setupPins();
     }
-    String getChipName() { return "decimal display"; }
+    String getChipName() {
+	switch (displayMode) {
+	case 1:  return "hex display";
+	case 2:  return "octal display";
+	default: return "decimal display";
+	}
+    }
     
     void draw(Graphics g) {
         drawChip(g);
@@ -53,21 +64,40 @@ class DecimalDisplayElm extends ChipElm {
         for (i = 0; i != bitCount; i++)
             if (pins[i].value)
         	value |= 1<<i;
-        String str = String.valueOf(value);
+        String str;
+        switch (displayMode) {
+        case 1:  str = Integer.toHexString(value).toUpperCase(); break;
+        case 2:  str = Integer.toOctalString(value); break;
+        default: str = String.valueOf(value); break;
+        }
         int w=(int)g.context.measureText(str).getWidth();
         g.drawString(str, xl+5*csize-w/2, yl);
         g.restore();
     }
     
-    String dump() { return super.dump() + " " + bitCount; }
+    String dump() { return super.dump() + " " + bitCount + " " + displayMode; }
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "bc", bitCount);
+        XMLSerializer.dumpAttr(elem, "dm", displayMode);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        bitCount = xml.parseIntAttr("bc", bitCount);
+        displayMode = xml.parseIntAttr("dm", displayMode);
+	setupPins();
+    }
     
+    String getXmlDumpType() { return "dd"; }
+    boolean allowBus() { return true; }
+
     void setupPins() {
 	sizeX = 3;
-	sizeY = bitCount;
+	sizeY = useBus() ? 2 : bitCount;
 	pins = new Pin[bitCount];
-	int i;
-	for (i = 0; i != bitCount; i++)
-	    pins[i] = new Pin(bitCount-1-i, SIDE_W, "I" + i);
+	makeBitPins(bitCount, 0, SIDE_W, 0, "I", false, false, false);
 	allocNodes();
     }
     int getPostCount() { return bitCount; }
@@ -77,16 +107,32 @@ class DecimalDisplayElm extends ChipElm {
         if (n == 0)
             return new EditInfo("# of Bits", bitCount, 1, 8).
                 setDimensionless();
-        return super.getChipEditInfo(n);
+        if (n == 1) {
+            EditInfo ei = new EditInfo("Display Mode", 0, -1, -1);
+            ei.choice = new Choice();
+            ei.choice.add("Decimal");
+            ei.choice.add("Hexadecimal");
+            ei.choice.add("Octal");
+            ei.choice.select(displayMode);
+            return ei;
+        }
+        return null;
     }
     public void setChipEditValue(int n, EditInfo ei) {
-        if (n == 0 && ei.value >= 1 && ei.value <= 16) {
-            bitCount = (int) ei.value;
-            setupPins();
-            setPoints();
+        if (n == 0) {
+            if (ei.value >= 1 && ei.value <= 16) {
+                int newBitCount = (int) ei.value;
+                if (newBitCount != bitCount) {
+                    bitCount = newBitCount;
+                    setupPins();
+                    setPoints();
+                }
+            } else
+                ei.setError("must be between 1 and 16");
             return;
         }
-        super.setChipEditValue(n, ei);
+        if (n == 1)
+            displayMode = ei.choice.getSelectedIndex();
     }
 
 }

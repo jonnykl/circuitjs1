@@ -1,5 +1,8 @@
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 public class PolarCapacitorElm extends CapacitorElm {
     	double maxNegativeVoltage;
     	
@@ -13,8 +16,19 @@ public class PolarCapacitorElm extends CapacitorElm {
 	    maxNegativeVoltage = new Double(st.nextToken()).doubleValue();
 	}
 	int getDumpType() { return 209; }
+	String getXmlDumpType() { return "pc"; }
 	String dump() {
 	    return super.dump() + " " + maxNegativeVoltage;
+	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "mv", maxNegativeVoltage);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    maxNegativeVoltage = xml.parseDoubleAttr("mv", maxNegativeVoltage);
 	}
 	
 	Point plusPoint;
@@ -54,8 +68,12 @@ public class PolarCapacitorElm extends CapacitorElm {
 	    return super.getEditInfo(n);
 	}
 	public void setEditValue(int n, EditInfo ei) {
-	    if (n == 4 && ei.value >= 0)
-		maxNegativeVoltage = ei.value;
+	    if (n == 4) {
+		if (ei.value >= 0)
+		    maxNegativeVoltage = ei.value;
+		else
+		    ei.setError("must be >= 0");
+	    }
 	    super.setEditValue(n, ei);
 	}
 	

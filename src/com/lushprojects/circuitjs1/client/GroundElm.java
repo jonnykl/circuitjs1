@@ -19,7 +19,10 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class GroundElm extends CircuitElm {
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class GroundElm extends CircuitElm {
 	static int lastSymbolType = 0;
 	int symbolType;
 	
@@ -30,6 +33,7 @@ package com.lushprojects.circuitjs1.client;
 	    super(xx, yy);
 	    symbolType = lastSymbolType;
 	}
+	boolean getDragVertical(boolean requestedVertical) { return true; }
 	public GroundElm(int xa, int ya, int xb, int yb, int f,
 			 StringTokenizer st) {
 	    super(xa, ya, xb, yb, f);
@@ -42,6 +46,18 @@ package com.lushprojects.circuitjs1.client;
 	String dump() {
 	    return super.dump() + " " + symbolType;
 	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    if (symbolType != 0)
+		XMLSerializer.dumpAttr(elem, "sy", symbolType);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    symbolType = xml.parseIntAttr("sy", 0);
+	}
+
 	int getDumpType() { return 'g'; }
 	int getPostCount() { return 1; }
 	void draw(Graphics g) {
@@ -89,9 +105,9 @@ package com.lushprojects.circuitjs1.client;
 	}
 	void stamp() {
 	    if (isOldStyle())
-		sim.stampVoltageSource(0, nodes[0], voltSource, 0);
+		sim.stampVoltageSource(CircuitNode.ground, nodes[0], voltSource, 0);
 	}
-	void setCurrent(int x, double c) { current = isOldStyle() ? -c : c; }
+	void setCurrent(VoltageSource vs, double c) { current = isOldStyle() ? -c : c; }
 
 	boolean isWireEquivalent() { return true; }
 	boolean isRemovableWire() { return true; }
@@ -113,7 +129,15 @@ package com.lushprojects.circuitjs1.client;
 	    arr[1] = "I = " + getCurrentText(getCurrent());
 	}
 	boolean hasGroundConnection(int n1) { return true; }
+	void addRoutingObstacle(WireRouter router) {
+	    router.addWire(point1.x, point1.y, point2.x, point2.y);
+	    Point pa = new Point(), pb = new Point();
+	    interpPoint2(point1, point2, pa, pb, 1+11./dn, 10);
+	    router.addObstacle(new Point[] { pa, pb, point2 });
+	}
+
 	int getShortcut() { return 'g'; }
+	int getDragLength() { return 32; }
 	
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0) {

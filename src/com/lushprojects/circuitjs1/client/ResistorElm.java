@@ -21,6 +21,8 @@ package com.lushprojects.circuitjs1.client;
 
 import com.google.gwt.canvas.dom.client.CanvasGradient;
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
     class ResistorElm extends CircuitElm {
 	double resistance;
@@ -31,8 +33,19 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 	    resistance = new Double(st.nextToken()).doubleValue();
 	}
 	int getDumpType() { return 'r'; }
+
 	String dump() {
 	    return super.dump() + " " + resistance;
+	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "r", resistance);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    resistance = xml.parseDoubleAttr("r", resistance);
 	}
 
 	Point ps3, ps4;
@@ -47,7 +60,7 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 	    int segments = 16;
 	    int i;
 	    int ox = 0;
-	    //int hs = sim.euroResistorCheckItem.getState() ? 6 : 8;
+	    //int hs = showEuroResistors() ? 6 : 8;
 	    int hs=6;
 	    double v1 = volts[0];
 	    double v2 = volts[1];
@@ -59,7 +72,7 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 	    g.context.save();
 	    g.context.setLineWidth(3.0);
 	    g.context.transform(((double)(lead2.x-lead1.x))/len, ((double)(lead2.y-lead1.y))/len, -((double)(lead2.y-lead1.y))/len,((double)(lead2.x-lead1.x))/len,lead1.x,lead1.y);
-	    if (sim.voltsCheckItem.getState() ) {
+	    if (app.menus.voltsCheckItem.getState() ) {
 		CanvasGradient grad = g.context.createLinearGradient(0,0,len,0);
 		grad.addColorStop(0, getVoltageColor(g,v1).getHexValue());
 		grad.addColorStop(1.0, getVoltageColor(g,v2).getHexValue());
@@ -68,7 +81,7 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 		setPowerColor(g, true);
 	    if (dn < 30)
 		hs = 2;
-	    if (!sim.euroResistorCheckItem.getState()) {
+	    if (!showEuroResistors()) {
 		g.context.beginPath();
 		g.context.moveTo(0,0);
 		for (i=0;i<4;i++){
@@ -82,13 +95,15 @@ import com.lushprojects.circuitjs1.client.util.Locale;
 		g.context.strokeRect(0, -hs, len, 2.0*hs);
 	    }
 	    g.context.restore();
-	    if (sim.showValuesCheckItem.getState()) {
-		String s = getShortUnitText(resistance, "");
+	    if (showValues()) {
+		//	Add Omega symbol to resistors
+		String s = getShortUnitText(resistance, showOhmSymbol() ? Locale.ohmString : "");
 		drawValues(g, s, hs+2);
 	    }
 	    doDots(g);
 	    drawPosts(g);
 	}
+	void addRoutingObstacle(WireRouter wr) { addRoutingObstacleWithLeads(wr, 6); }
 
 	void calculateCurrent() {
 	    current = (volts[0]-volts[1])/resistance;

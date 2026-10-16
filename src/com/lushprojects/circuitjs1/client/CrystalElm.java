@@ -20,8 +20,11 @@
 package com.lushprojects.circuitjs1.client;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 class CrystalElm extends CompositeElm {
+	static final int FLAG_SHOW_FREQ = 2;
 	double seriesCapacitance, parallelCapacitance;
 	double inductance, resistance;
 	Point plate1[], plate2[];
@@ -30,6 +33,7 @@ class CrystalElm extends CompositeElm {
 	
 	public CrystalElm(int xx, int yy) {
 	    super(xx, yy, modelString, modelExternalNodes);
+	    flags = FLAG_SHOW_FREQ;
 	    parallelCapacitance = 28.7e-12;
 	    seriesCapacitance = 0.1e-12;
 	    inductance = 2.5e-3;
@@ -63,7 +67,25 @@ class CrystalElm extends CompositeElm {
 
 
 	int getDumpType() { return 412; }
-	
+	String getXmlDumpType() { return "cr"; }
+
+        void dumpXml(Document doc, Element elem) {
+            super.dumpXml(doc, elem);
+            XMLSerializer.dumpAttr(elem, "pc", parallelCapacitance);
+            XMLSerializer.dumpAttr(elem, "sc", seriesCapacitance);
+            XMLSerializer.dumpAttr(elem, "in", inductance);
+            XMLSerializer.dumpAttr(elem, "r", resistance);
+        }
+
+        void undumpXml(XMLDeserializer xml) {
+            super.undumpXml(xml);
+            resistance = xml.parseDoubleAttr("r", resistance);
+            inductance = xml.parseDoubleAttr("in", inductance);
+            parallelCapacitance = xml.parseDoubleAttr("pc", parallelCapacitance);
+            seriesCapacitance = xml.parseDoubleAttr("sc", seriesCapacitance);
+	    initCrystal();
+        }
+
 	Point sandwichPoints[];
 	
 	void setPoints() {
@@ -97,7 +119,7 @@ class CrystalElm extends CompositeElm {
 	    drawThickLine(g, point1, lead1);
 	    setPowerColor(g, false);
 	    drawThickLine(g, plate1[0], plate1[1]);
-	    if (sim.powerCheckItem.getState())
+	    if (showPower())
 		g.setColor(Color.gray);
 
 	    // draw second lead and plate
@@ -112,11 +134,16 @@ class CrystalElm extends CompositeElm {
 		drawThickLine(g,  sandwichPoints[i], sandwichPoints[(i+1) % 4]);
 	    
 	    updateDotCount();
-	    if (sim.dragElm != this) {
+	    if (!isCreating()) {
 		drawDots(g, point1, lead1, curcount);
 		drawDots(g, point2, lead2, -curcount);
 	    }
 	    drawPosts(g);
+	    if (hasFlag(FLAG_SHOW_FREQ)) {
+		double fs = 1/(Math.sqrt(inductance*seriesCapacitance)*Math.PI*2);
+		String s = getShortUnitText(fs, "Hz");
+		drawValues(g, s, hs);
+	    }
 	}
 	
 	public void stepFinished() {
@@ -127,24 +154,32 @@ class CrystalElm extends CompositeElm {
 	void getInfo(String arr[]) {
 	    arr[0] = "crystal";
 	    getBasicInfo(arr);
-	    arr[3] = "fs = " + getUnitText(1/(Math.sqrt(inductance*seriesCapacitance)*Math.PI*2), "Hz");
-//	    arr[3] = "C = " + getUnitText(capacitance, "F");
-//	    arr[4] = "P = " + getUnitText(getPower(), "W");
-	    //double v = getVoltageDiff();
-	    //arr[4] = "U = " + getUnitText(.5*capacitance*v*v, "J");
+	    double fs = 1/(Math.sqrt(inductance*seriesCapacitance)*Math.PI*2);
+	    double cSer = (parallelCapacitance*seriesCapacitance)/(parallelCapacitance+seriesCapacitance);
+	    double fp = 1/(Math.sqrt(inductance*cSer)*Math.PI*2);
+	    double q = 2*Math.PI*fs*inductance/resistance;
+	    arr[3] = "fs = " + getUnitText(fs, "Hz");
+	    arr[4] = "fp = " + getUnitText(fp, "Hz");
+	    arr[5] = "Q = " + getUnitText(q, "");
+	    arr[6] = "P = " + getUnitText(getPower(), "W");
 	}
 	
 	public boolean canViewInScope() { return true; }
 	
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo(EditInfo.makeLink("crystal.html", "Parallel Capacitance"), parallelCapacitance);
+		return new EditInfo(EditInfo.makeLink("crystal.html", "Parallel Capacitance"), parallelCapacitance).setPositive();
 	    if (n == 1)
-		return new EditInfo("Series Capacitance (F)", seriesCapacitance);
+		return new EditInfo("Series Capacitance (F)", seriesCapacitance).setPositive();
 	    if (n == 2)
-		return new EditInfo("Inductance (H)", inductance, 0, 0);
+		return new EditInfo("Inductance (H)", inductance, 0, 0).setPositive();
 	    if (n == 3)
-		return new EditInfo("Resistance (" + Locale.ohmString + ")", resistance, 0, 0);
+		return new EditInfo("Resistance (" + Locale.ohmString + ")", resistance, 0, 0).setPositive();
+	    if (n == 4) {
+		EditInfo ei = new EditInfo("", 0, -1, -1);
+		ei.checkbox = new Checkbox("Show Frequency", hasFlag(FLAG_SHOW_FREQ));
+		return ei;
+	    }
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
@@ -156,6 +191,8 @@ class CrystalElm extends CompositeElm {
 		inductance = ei.value;
 	    if (n == 3 && ei.value > 0)
 		resistance = ei.value;
+	    if (n == 4)
+		flags = ei.changeFlag(flags, FLAG_SHOW_FREQ);
 	    initCrystal();
 	}
     }

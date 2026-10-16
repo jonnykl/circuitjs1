@@ -7,6 +7,8 @@ import java.util.Vector;
 
 import com.google.gwt.user.client.Window;
 import com.google.gwt.user.client.ui.TextArea;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 
 public class CustomLogicModel implements Editable {
 
@@ -89,9 +91,24 @@ public class CustomLogicModel implements Editable {
 	outputs = listToArray(unescape(st.nextToken()));
 	infoText = unescape(st.nextToken());
 	rules = unescape(st.nextToken());
-	parseRules();
+	parseRules(null);
     }
-    
+
+    static void undumpModelXml(XMLDeserializer xml) {
+        String name = xml.parseStringAttr("nm", null);
+        CustomLogicModel model = getModelWithName(name);
+        model.undumpXml(xml);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        flags = xml.parseIntAttr("f", flags);
+        inputs = listToArray(xml.parseStringAttr("in", null));
+        outputs = listToArray(xml.parseStringAttr("o", null));
+        infoText = xml.parseStringAttr("if", null);
+	rules = xml.parseContents().trim();
+	parseRules(null);
+    }
+
     String arrayToList(String arr[]) {
 	if (arr == null)
 	    return "";
@@ -108,6 +125,8 @@ public class CustomLogicModel implements Editable {
 	return arr.split(",");
     }
     
+    public String getDialogTitle() { return "Edit Custom Logic Model"; }
+
     public EditInfo getEditInfo(int n) {
         if (n == 0) {
             EditInfo ei = new EditInfo("Inputs", 0, -1, -1);
@@ -126,6 +145,7 @@ public class CustomLogicModel implements Editable {
         }
         if (n == 3) {
             EditInfo ei = new EditInfo(EditInfo.makeLink("customlogic.html", "Definition"), 0, -1, -1);
+            ei.setErrorFieldName("Definition");
             ei.textArea = new TextArea();
             ei.textArea.setVisibleLines(5);
             ei.textArea.setText(rules);
@@ -151,7 +171,7 @@ public class CustomLogicModel implements Editable {
 	    infoText = ei.textf.getText();
 	if (n == 3) {
 	    rules = ei.textArea.getText();
-	    parseRules();
+	    parseRules(ei);
 	}
 	if (n == 4) {
 	    if (ei.checkbox.getState())
@@ -159,34 +179,38 @@ public class CustomLogicModel implements Editable {
 	    else
 		flags &= ~FLAG_SCHMITT;
 	}
-	CirSim.theSim.updateModels();
+	CirSim.theApp.updateModels();
     }
 
-    void parseRules() {
+    void parseRules(EditInfo ei) {
 	String lines[] = rules.split("\n");
 	int i;
 	rulesLeft = new Vector<String>();
 	rulesRight = new Vector<String>();
 	triState = false;
 	for (i = 0; i != lines.length; i++) {
-	    String s = lines[i].toLowerCase();
+	    String s = lines[i].toLowerCase().trim();
 	    if (s.length() == 0 || s.startsWith("#"))
 		continue;
 	    String s0[] = s.replaceAll(" ", "").split("=");
 	    if (s0.length != 2) {
-		Window.alert("Error on line " + (i+1) + " of model description");
+		if (ei != null)
+		    ei.setError("error on line " + (i+1));
 		return;
 	    }
 	    if (s0[0].length() < inputs.length) {
-		Window.alert("Model must have >= " + (inputs.length) + " digits on left side");
+		if (ei != null)
+		    ei.setError("must have >= " + (inputs.length) + " digits on left side (line " + (i+1) + ")");
 		return;
 	    }
 	    if (s0[0].length() > inputs.length + outputs.length) {
-		Window.alert("Model must have <= " + (inputs.length+outputs.length) + " digits on left side");
+		if (ei != null)
+		    ei.setError("must have <= " + (inputs.length+outputs.length) + " digits on left side (line " + (i+1) + ")");
 		return;
 	    }
 	    if (s0[1].length() != outputs.length) {
-		Window.alert("Model must have " + (outputs.length) + " digits on right side");
+		if (ei != null)
+		    ei.setError("must have " + (outputs.length) + " digits on right side (line " + (i+1) + ")");
 		return;
 	    }
 	    String rl = s0[0];
@@ -200,7 +224,8 @@ public class CustomLogicModel implements Editable {
 		    continue;
 		}
 		if (x < 'a' || x > 'z') {
-		    Window.alert("Error on line " + (i+1) + " of model description");
+		    if (ei != null)
+			ei.setError("error on line " + (i+1));
 		    return;
 		}
 		// if a letter appears twice, capitalize it the 2nd time so we can compare
@@ -219,14 +244,18 @@ public class CustomLogicModel implements Editable {
 	}
     }
     
-    String dump() {
-	dumped = true;
-	if (rules.length() > 0 && !rules.endsWith("\n"))
-	    rules += "\n";
-	return "! " + escape(name) + " " + flags + " " + escape(arrayToList(inputs)) + " " +
-		escape(arrayToList(outputs)) + " " + escape(infoText) + " " + escape(rules); 
+    void dumpXml(Document doc) {
+        dumped = true;
+        Element elem = doc.createElement("clm");
+        XMLSerializer.dumpAttr(elem, "nm", name);
+        XMLSerializer.dumpAttr(elem, "f", flags);
+        XMLSerializer.dumpAttr(elem, "in", arrayToList(inputs));
+        XMLSerializer.dumpAttr(elem, "o", arrayToList(outputs));
+        XMLSerializer.dumpAttr(elem, "if", infoText);
+	elem.appendChild(doc.createTextNode(rules));
+        doc.getDocumentElement().appendChild(elem);
     }
-    
+
     static String escape(String s) {
 	if (s.length() == 0)
 	    return "\\0";

@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 class AnalogSwitchElm extends CircuitElm {
     final int FLAG_INVERT = 1;
     final int FLAG_PULLDOWN = 2;
@@ -55,17 +58,34 @@ class AnalogSwitchElm extends CircuitElm {
     String dump() {
 	return super.dump() + " " + r_on + " " + r_off + " " + threshold;
     }
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "ron", r_on);
+        XMLSerializer.dumpAttr(elem, "roff", r_off);
+        XMLSerializer.dumpAttr(elem, "th", threshold);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        r_on = xml.parseDoubleAttr("ron", r_on);
+        r_off = xml.parseDoubleAttr("roff", r_off);
+        threshold = xml.parseDoubleAttr("th", threshold);
+    }
     
     int getDumpType() { return 159; }
+    String getXmlDumpType() { return "as"; }
+
     boolean open;
     int openhs;
 	
-    Point ps, point3, lead3;
+    Point ps, ps1, point3, lead3;
     void setPoints() {
 	super.setPoints();
 	calcLeads(32);
 	adjustLeadsToGrid(isFlippedX(), isFlippedY());
 	ps = new Point();
+	ps1 = new Point();
 	openhs = (isFlippedX() != isFlippedY()) != isFlipped() ? -16 : 16;
 	point3 = interpPoint(lead1, lead2, .5, -openhs);
 	lead3  = interpPoint(lead1, lead2, .5, -openhs/2);
@@ -91,14 +111,16 @@ class AnalogSwitchElm extends CircuitElm {
     }
 
     void draw(Graphics g) {
-	int hs = (open) ? openhs : 0;
+	int hs1 = (open) ? 0 : 2;
+	int hs2 = (open) ? openhs : 2;
 	setBbox(point1, point2, openhs);
 
 	draw2Leads(g);
-	    
+
 	g.setColor(lightGrayColor);
-	interpPoint(lead1, lead2, ps, 1, hs);
-	drawThickLine(g, lead1, ps);
+	interpPoint(lead1, lead2, ps1, 0, hs1);
+	interpPoint(lead1, lead2, ps,  1, hs2);
+	drawThickLine(g, ps1, ps);
 
 	setVoltageColor(g, volts[2]);
 	drawThickLine(g, point3, lead3);
@@ -108,6 +130,8 @@ class AnalogSwitchElm extends CircuitElm {
 	drawPosts(g);
     }
     void calculateCurrent() {
+	if (resistance == 0)
+	    return;
 	if (needsPulldown() && open)
 	    current = 0;
 	else
@@ -124,8 +148,8 @@ class AnalogSwitchElm extends CircuitElm {
 	sim.stampNonLinear(nodes[1]);
 	if (needsPulldown()) {
 	    // pulldown resistor on each side
-	    sim.stampResistor(nodes[0], 0, r_off);
-	    sim.stampResistor(nodes[1], 0, r_off);
+	    sim.stampResistor(nodes[0], CircuitNode.ground, r_off);
+	    sim.stampResistor(nodes[1], CircuitNode.ground, r_off);
 	}
     }
     void doStep() {
@@ -171,9 +195,9 @@ class AnalogSwitchElm extends CircuitElm {
 	    return ei;
 	}
 	if (n == 1)
-	    return new EditInfo("On Resistance (ohms)", r_on, 0, 0);
+	    return new EditInfo("On Resistance (ohms)", r_on, 0, 0).setPositive();
 	if (n == 2)
-	    return new EditInfo("Off Resistance (ohms)", r_off, 0, 0);
+	    return new EditInfo("Off Resistance (ohms)", r_off, 0, 0).setPositive();
 	if (n == 3)
 	    return EditInfo.createCheckbox("Pulldown Resistor", needsPulldown());
         if (n == 4)

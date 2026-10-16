@@ -23,12 +23,20 @@ import java.util.HashMap;
 
 import com.google.gwt.user.client.ui.Button;
 import com.google.gwt.user.client.ui.TextArea;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 
     class SRAMElm extends ChipElm {
+	static final int FLAG_HEX_DISPLAY = 4;
 	int addressNodes, dataNodes, internalNodes;
 	int addressBits, dataBits;
 	HashMap<Integer, Integer> map;
+	HashMap<Integer, Integer> initialMap; // saved initial contents for restore on reset
+	String loadedFileName; // remembers the last file loaded via "Load Contents From File"
+	static final int FLAG_RELOAD_ON_RESET = 2;
 	static String contentsOverride = null;
+	TextArea editTextArea;
+	static String fileNameOverride = null;
 
 	public SRAMElm(int xx, int yy) {
 	    super(xx, yy);
@@ -61,54 +69,56 @@ import com.google.gwt.user.client.ui.TextArea;
 		    }
 		}
 	    } catch (Exception e) {}
+	    if ((flags & FLAG_RELOAD_ON_RESET) != 0)
+		initialMap = new HashMap<Integer, Integer>(map);
 	}
 
-	String dump() {
-	    String s = super.dump() + " " + addressBits + " " + dataBits;
-	    
-	    // dump contents
-	    int maxI = 1<<addressBits;
-	    int i;
-	    for (i = 0; i < maxI; i++) {
-		Integer val = map.get(i);
-		if (val == null)
-		    continue;
-		s += " " + i + " " + val;
-		while (true) {
-		    val = map.get(++i);
-		    if (val == null)
-			break;
-		    s += " " + val;
-		}
-		s += " -1";
-	    }
-	    s += " -2";
-	    return s;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "ab", addressBits);
+	    XMLSerializer.dumpAttr(elem, "db", dataBits);
+	}
+	void dumpXmlState(Document doc, Element elem) {
+	    super.dumpXmlState(doc, elem);
+	    if (!map.isEmpty())
+		elem.appendChild(doc.createTextNode(contentsToString()));
+	}
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    addressBits = xml.parseIntAttr("ab", addressBits);
+	    dataBits = xml.parseIntAttr("db", dataBits);
+	    map = new java.util.HashMap<Integer, Integer>();
+	    try {
+		parseContentsString(xml.parseContents());
+	    } catch (Exception e) {}
+	    setupPins();
+	}
+
+	void reset() {
+	    super.reset();
+	    if ((flags & FLAG_RELOAD_ON_RESET) != 0 && initialMap != null)
+		map = new HashMap<Integer, Integer>(initialMap);
 	}
 
 	boolean nonLinear() { return true; }
+	boolean allowBus() { return true; }
 	String getChipName() { return "Static RAM"; }
 	void setupPins() {
 	    sizeX = 2;
-	    sizeY = max(addressBits, dataBits) + 1;
+	    int addrY = useBus() ? 1 : addressBits;
+	    int dataY = useBus() ? 1 : dataBits;
+	    sizeY = max(addrY, dataY) + 1;
+	    bits = addressBits;
 	    pins = new Pin[getPostCount()];
 	    pins[0] = new Pin(0, SIDE_W, "WE");
 	    pins[0].lineOver = true;
 	    pins[1] = new Pin(0, SIDE_E, "OE");
 	    pins[1].lineOver = true;
-	    int i;
 	    addressNodes = 2;
 	    dataNodes = 2+addressBits;
 	    internalNodes = 2+addressBits+dataBits;
-	    for (i = 0; i != addressBits; i++) {
-		int ii = i+addressNodes;
-		pins[ii] = new Pin(sizeY-addressBits+i, SIDE_W, "A" + (addressBits-i-1));
-	    }
-	    for (i = 0; i != dataBits; i++) {
-		int ii = i+dataNodes;
-		pins[ii] = new Pin(sizeY-dataBits+i, SIDE_E, "D" + (dataBits-i-1));
-		pins[ii].output = true;
-	    }
+	    makeBitPins(addressBits, sizeY-addrY, SIDE_W, addressNodes, "A", false, false, true);
+	    makeBitPins(dataBits, sizeY-dataY, SIDE_E, dataNodes, "D", true, false, true);
 	    allocNodes();
 	}
 	int getPostCount() {
@@ -122,94 +132,159 @@ import com.google.gwt.user.client.ui.TextArea;
             if (n == 2) {
         	EditInfo ei = new EditInfo("Contents", 0);
         	ei.textArea = new TextArea();
+        	editTextArea = ei.textArea;
         	ei.textArea.setVisibleLines(5);
-        	String s = "";
-        	if (contentsOverride != null) {
-        		s = contentsOverride;
-        		contentsOverride = null;
-        	} else {
-        	int i;
-        	int maxI = 1<<addressBits;
-        	for (i = 0; i < maxI; i++) {
-        	    Integer val = map.get(i);
-        	    if (val == null)
-        		continue;
-    	    	    s += i + ": " + val;
-    	    	    int ct = 1;
-    	    	    while (true) {
-    	    		val = map.get(++i);
-    	    		if (val == null)
-    	    		    break;
-    	    		s += " " + val;
-    	    		if (++ct == 8)
-    	    		    break;
-    	    	    }
-    	    	    s += "\n";
-//    	    	    sim.console("got " + i + " " + s);
-    	    	}
-        	}
+        	String s = (contentsOverride != null) ? contentsOverride : contentsToString();
+        	contentsOverride = null;
+		if (fileNameOverride != null)
+		    loadedFileName = fileNameOverride;
+		fileNameOverride = null;
     	    	ei.textArea.setText(s);
     	    	return ei;
             }
-            if (n == 3 && SRAMLoadFile.isSupported()) {
+            if (n == 3) {
             	EditInfo ei = new EditInfo("", 0, -1, -1);
-            	ei.loadFile = new SRAMLoadFile();
+            	ei.checkbox = new Checkbox("Hex Display", hasFlag(FLAG_HEX_DISPLAY));
+            	return ei;
+            }
+            if (n == 4 && SRAMLoadFile.isSupported()) {
+            	EditInfo ei = new EditInfo(
+		    loadedFileName != null ? "Loaded: " + loadedFileName : "",
+		    0, -1, -1);
+            	ei.loadFile = new SRAMLoadFile(dataBits);
             	ei.button = new Button("Load Contents From File");
             	ei.newDialog = true;
             	return ei;
             }
+	    int reloadIdx = SRAMLoadFile.isSupported() ? 5 : 4;
+	    if (n == reloadIdx) {
+		EditInfo ei = new EditInfo("", 0, -1, -1);
+		ei.checkbox = new Checkbox("Restore Contents on Reset",
+		    (flags & FLAG_RELOAD_ON_RESET) != 0);
+		return ei;
+	    }
 	    return super.getChipEditInfo(n);
 	}
 	
+	String contentsToString() {
+	    boolean hex = hasFlag(FLAG_HEX_DISPLAY);
+	    String s = "";
+	    int maxI = 1<<addressBits;
+	    for (int i = 0; i < maxI; i++) {
+		Integer val = map.get(i);
+		if (val == null || val == 0)
+		    continue;
+		s += (hex ? Integer.toHexString(i).toUpperCase() : "" + i) + ": " +
+		     (hex ? toHex(val) : "" + val);
+		int ct = 1;
+		while (true) {
+		    val = map.get(++i);
+		    if (val == null || val == 0)
+			break;
+		    s += " " + (hex ? toHex(val) : "" + val);
+		    if (++ct == 8)
+			break;
+		}
+		s += "\n";
+	    }
+	    return s;
+	}
+
+	String toHex(int val) {
+	    int mask = (1<<dataBits)-1;
+	    String h = Integer.toHexString(val & mask).toUpperCase();
+	    return h.length() < 2 ? "0" + h : h;
+	}
+
+	void parseContentsString(String s) {
+	    map.clear();
+	    String lines[] = s.split("\n");
+	    for (int i = 0; i != lines.length; i++) {
+		try {
+		    String line = lines[i];
+		    String args[] = line.split(": *");
+		    int addr = parseNumber(args[0]);
+		    String vals[] = args[1].split(" +");
+		    for (int j = 0; j != vals.length; j++) {
+			int val = parseNumber(vals[j]);
+			map.put(addr++, val);
+		    }
+		} catch (Exception e) {}
+	    }
+	}
+
 	int parseNumber(String str) {
 	    if (str.startsWith("0x"))
 		return Integer.parseInt(str.substring(2), 16);
+	    if (hasFlag(FLAG_HEX_DISPLAY))
+		return Integer.parseInt(str, 16);
 	    if (str.startsWith("0b"))
 		return Integer.parseInt(str.substring(2), 2);
 	    return Integer.parseInt(str);
 	}
 
 	public void setChipEditValue(int n, EditInfo ei) {
-	    if (n == 0 && ei.value >= 2 && ei.value <= 16) {
-		addressBits = (int)ei.value;
-		setupPins();
-		setPoints();
+	    if (n == 0) {
+		if (ei.value >= 2 && ei.value <= 16) {
+		    addressBits = (int)ei.value;
+		    setupPins();
+		    setPoints();
+		} else
+		    ei.setError("must be between 2 and 16");
 	    }
-	    if (n == 1 && ei.value >= 2 && ei.value <= 16) {
-		dataBits = (int)ei.value;
-		setupPins();
-		setPoints();
+	    if (n == 1) {
+		if (ei.value >= 2 && ei.value <= 16) {
+		    dataBits = (int)ei.value;
+		    setupPins();
+		    setPoints();
+		} else
+		    ei.setError("must be between 2 and 16");
 	    }
 	    if (n == 2) {
-		String s = ei.textArea.getText();
-		String lines[] = s.split("\n");
-		int i;
-		map.clear();
-		for (i = 0; i != lines.length; i++) {
-		    try {
-			String line = lines[i];
-			String args[] = line.split(": *");
-			int addr = parseNumber(args[0]);
-			String vals[] = args[1].split(" +");
-			int j;
-			for (j = 0; j != vals.length; j++) {
-			    int val = parseNumber(vals[j]);
-			    map.put(addr++, val);
-			}
-		    } catch (Exception e) {}
+		parseContentsString(ei.textArea.getText());
+		if ((flags & FLAG_RELOAD_ON_RESET) != 0)
+		    initialMap = new HashMap<Integer, Integer>(map);
+	    }
+	    if (n == 3) {
+		int oldFlags = flags;
+		if (editTextArea != null)
+		    parseContentsString(editTextArea.getText());
+		flags = ei.changeFlag(flags, FLAG_HEX_DISPLAY);
+		if (flags != oldFlags) {
+		    contentsOverride = contentsToString();
+		    ei.newDialog = true;
 		}
+	    }
+	    int reloadIdx = SRAMLoadFile.isSupported() ? 5 : 4;
+	    if (n == reloadIdx) {
+		flags = ei.changeFlag(flags, FLAG_RELOAD_ON_RESET);
+		if ((flags & FLAG_RELOAD_ON_RESET) != 0)
+		    initialMap = new HashMap<Integer, Integer>(map);
+		else
+		    initialMap = null;
 	    }
 	}
 	int getVoltageSourceCount() { return dataBits; }
 	int getInternalNodeCount() { return dataBits; }
-	
+	void setVoltageSource(int j, VoltageSource vs) {
+	    super.setVoltageSource(j, vs);
+	    vs.setNodes(CircuitNode.ground, nodes[internalNodes+j]);
+	}
+	boolean getMatrixConnection(int n1, int n2) {
+	    // each internal node connects to its corresponding data pin
+	    for (int i = 0; i != dataBits; i++)
+		if (comparePair(n1, n2, internalNodes+i, dataNodes+i))
+		    return true;
+	    return false;
+	}
+
 	int address;
 	
 	void stamp() {
 	    int i;
 	    for (i = 0; i != dataBits; i++) {
 		Pin p = pins[i+dataNodes];
-		sim.stampVoltageSource(0, nodes[internalNodes+i], p.voltSource);
+		sim.stampVoltageSource(CircuitNode.ground, nodes[internalNodes+i], p.voltSource);
 		sim.stampNonLinear(nodes[internalNodes+i]);
 		sim.stampNonLinear(nodes[dataNodes+i]);
 	    }
@@ -230,11 +305,14 @@ import com.google.gwt.user.client.ui.TextArea;
 	    int data = (dataObj == null) ? 0 : dataObj;
 	    for (i = 0; i != dataBits; i++) {
 		Pin p = pins[i+dataNodes];
-		sim.updateVoltageSource(0, nodes[internalNodes+i], p.voltSource, (data & (1<<(dataBits-1-i))) == 0 ? 0 : 5);
+		sim.updateVoltageSource(CircuitNode.ground, nodes[internalNodes+i], p.voltSource, (data & (1<<(dataBits-1-i))) == 0 ? 0 : highVoltage);
 		
-		// stamp resistor from internal voltage source to data pin.
-		// if output enabled, make it a small resistor.  otherwise large.
-		sim.stampResistor(nodes[internalNodes+i], nodes[dataNodes+i], outputEnabled ? 1 : 1e8);
+		// if output enabled, stamp a small resistor from internal voltage source to data pin.
+		// if output disabled, stamp a large pulldown resistor from data pin to ground.
+		if (outputEnabled)
+		    sim.stampResistor(nodes[internalNodes + i], nodes[dataNodes + i], 1);
+		else
+		    sim.stampResistor(nodes[dataNodes + i], CircuitNode.ground, 1e8);
 	    }
 	}
 	

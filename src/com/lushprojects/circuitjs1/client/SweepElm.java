@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 class SweepElm extends CircuitElm {
     double maxV, maxF, minF, sweepTime, frequency;
     final int FLAG_LOG = 1;
@@ -41,17 +44,38 @@ class SweepElm extends CircuitElm {
 	reset();
     }
     int getDumpType() { return 170; }
+    String getXmlDumpType() { return "sw"; }
     int getPostCount() { return 1; }
     final int circleSize = 17;
 
-    String dump() {
-	return super.dump() + " " + minF + " " + maxF + " " + maxV + " " +
-	    sweepTime;
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "mi", minF);
+        XMLSerializer.dumpAttr(elem, "ma", maxF);
+        XMLSerializer.dumpAttr(elem, "mv", maxV);
+        XMLSerializer.dumpAttr(elem, "sw", sweepTime);
     }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        minF = xml.parseDoubleAttr("mi", minF);
+        maxF = xml.parseDoubleAttr("ma", maxF);
+        maxV = xml.parseDoubleAttr("mv", maxV);
+        sweepTime = xml.parseDoubleAttr("sw", sweepTime);
+	reset();
+    }
+
     void setPoints() {
 	super.setPoints();
 	lead1 = interpPoint(point1, point2, 1-circleSize/dn);
     }
+
+    void addRoutingObstacle(WireRouter router) {
+	router.addWire(point1.x, point1.y, lead1.x, lead1.y);
+	router.addObstacle(point2.x - circleSize, point2.y - circleSize,
+			   point2.x + circleSize, point2.y + circleSize);
+    }
+
     void draw(Graphics g) {
 	setBbox(point1, point2, circleSize);
 	setVoltageColor(g, volts[0]);
@@ -71,7 +95,7 @@ class SweepElm extends CircuitElm {
 	if (tm > 1000)
 	    tm = 2000-tm;
 	double w = 1+tm*.002;
-	if (sim.simIsRunning())
+	if (app.simIsRunning())
 	    w = 1+2*(frequency-minF)/(maxF-minF);
 	
 	g.context.beginPath();
@@ -86,7 +110,7 @@ class SweepElm extends CircuitElm {
 	g.context.stroke();
 	g.context.setLineWidth(1.0);
 
-	if (sim.showValuesCheckItem.getState()) {
+	if (showValues()) {
 	    String s = getShortUnitText(frequency, "Hz");
 	    if (dx == 0 || dy == 0)
 		drawValues(g, s, circleSize);
@@ -94,12 +118,13 @@ class SweepElm extends CircuitElm {
 	    
 	drawPosts(g);
 	curcount = updateDotCount(-current, curcount);
-	if (sim.dragElm != this)
+	if (!isCreating())
 	    drawDots(g, point1, lead1, curcount);
     }
 	
+    boolean validate() { return validateRailNode(0); }
     void stamp() {
-	sim.stampVoltageSource(0, nodes[0], voltSource);
+	sim.stampVoltageSource(CircuitNode.ground, nodes[0], voltSource);
     }
     double fadd, fmul, freqTime, savedTimeStep;
     int dir = 1;
@@ -147,12 +172,13 @@ class SweepElm extends CircuitElm {
 	}
     }
     void doStep() {
-	sim.updateVoltageSource(0, nodes[0], voltSource, v);
+	sim.updateVoltageSource(CircuitNode.ground, nodes[0], voltSource, v);
     }
 	
     double getVoltageDiff() { return volts[0]; }
     int getVoltageSourceCount() { return 1; }
     boolean hasGroundConnection(int n1) { return true; }
+    String getElmType() { return "sweep"; }
     void getInfo(String arr[]) {
 	arr[0] = "sweep " + (((flags & FLAG_LOG) == 0) ? "(linear)" : "(log)");
 	arr[1] = "I = " + getCurrentDText(getCurrent());
@@ -175,7 +201,7 @@ class SweepElm extends CircuitElm {
 	    return ei;
 	}
 	if (n == 4)
-	    return new EditInfo("Max Voltage", maxV, 0, 0);
+	    return new EditInfo("Max Voltage", maxV, 0, 0).setUnitStep();
 	if (n == 5) {
 	    EditInfo ei = new EditInfo("", 0, -1, -1);
 	    ei.checkbox = new Checkbox("Bidirectional", (flags & FLAG_BIDIR) != 0);

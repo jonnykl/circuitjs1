@@ -20,6 +20,8 @@
 package com.lushprojects.circuitjs1.client;
 
 import com.google.gwt.user.client.Window;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 class CustomTransformerElm extends CircuitElm {
 	double coilCurrents[], coilInductances[], coilCurCounts[], coilCurSourceValues[], coilPolarities[];
@@ -69,8 +71,8 @@ class CustomTransformerElm extends CircuitElm {
 	    parseDescription(description);
 	}
 	void drag(int xx, int yy) {
-	    xx = sim.snapGrid(xx);
-	    yy = sim.snapGrid(yy);
+	    xx = snapGrid(xx);
+	    yy = snapGrid(yy);
 //	    width = max(32, abs(yy-y));
 	    if (xx == x)
 	        yy = y;
@@ -78,27 +80,53 @@ class CustomTransformerElm extends CircuitElm {
 	    setPoints();
 	}
 	int getDumpType() { return 406; }
-	String dump() {
-	    String s = super.dump() + " " + inductance + " " + couplingCoef + " " + CustomLogicModel.escape(description) + " " + coilCount + " ";
-	    int i;
-	    for (i = 0; i != coilCount; i++) {
-		s += coilCurrents[i] + " ";
-	    }
-	    return s;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "in", inductance);
+	    XMLSerializer.dumpAttr(elem, "cc", couplingCoef);
+	    XMLSerializer.dumpAttr(elem, "ds", description);
+	    XMLSerializer.dumpAttr(elem, "nc", coilCount);
 	}
-	
+	void dumpXmlState(Document doc, Element elem) {
+	    String s = "";
+	    for (int i = 0; i != coilCount; i++) {
+		if (i > 0) s += " ";
+		s += coilCurrents[i];
+	    }
+	    XMLSerializer.dumpAttr(elem, "ci", s);
+	}
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    inductance = xml.parseDoubleAttr("in", inductance);
+	    couplingCoef = xml.parseDoubleAttr("cc", couplingCoef);
+	    description = xml.parseStringAttr("ds", description);
+	    coilCount = xml.parseIntAttr("nc", coilCount);
+	    coilCurrents = new double[coilCount];
+	    String ci = xml.parseStringAttr("ci", null);
+	    if (ci != null) {
+		StringTokenizer st = new StringTokenizer(ci, " ");
+		for (int i = 0; i != coilCount && st.hasMoreTokens(); i++)
+		    coilCurrents[i] = Double.parseDouble(st.nextToken());
+	    }
+	    parseDescription(description);
+	}
+
 	void parseDescription() {
 	    parseDescription(description);
 	}
 	
 	boolean parseDescription(String desc) {
+	    return parseDescription(desc, null);
+	}
+
+	boolean parseDescription(String desc, EditInfo ei) {
 	    // a number indicates a coil (number = turns ratio to base inductance coil)
 	    // (negative number = reverse polarity)
 	    // : separates primary and secondary
 	    // , separates two coils
 	    // + separates two connected coils (tapped)
 	    StringTokenizer st = new StringTokenizer(desc, ",:+", true);
-	    
+
 	    // count coils/nodes
 	    coilCount = nodeCount = 0;
 	    while (st.hasMoreTokens()) {
@@ -110,7 +138,13 @@ class CustomTransformerElm extends CircuitElm {
 		nodeCount += 2;
 		coilCount++;
 	    }
-	    
+
+	    if (coilCount == 0) {
+		if (ei != null)
+		    ei.setError("no coils defined");
+		return false;
+	    }
+
 	    coilNodes = new int[coilCount];
 	    coilInductances = new double[coilCount];
 	    // save coil currents if possible (needed for undumping)
@@ -123,7 +157,7 @@ class CustomTransformerElm extends CircuitElm {
 	    nodeTaps = newPointArray(nodeCount);
 	    nodeCurrents = new double[nodeCount];
 	    nodeCurCounts = new double[nodeCount];
-	    
+
 	    // start over
 	    st = new StringTokenizer(desc, ",:+", true);
 	    int nodeNum = 0;
@@ -136,9 +170,16 @@ class CustomTransformerElm extends CircuitElm {
 		double n = 0;
 		try {
 		    n = Double.parseDouble(tok);
-		} catch (Exception e) { return false; }
-		if (n == 0)
+		} catch (Exception e) {
+		    if (ei != null)
+			ei.setError("expected number, got '" + tok + "'");
 		    return false;
+		}
+		if (n == 0) {
+		    if (ei != null)
+			ei.setError("turns ratio cannot be zero");
+		    return false;
+		}
 		// create new coil
 		coilNodes[coilNum] = nodeNum;
 		coilInductances[coilNum] = n*n*inductance;
@@ -162,11 +203,16 @@ class CustomTransformerElm extends CircuitElm {
 		}
 		if (tok == ":") {
 		    // switch to secondary
-		    if (secondary)
+		    if (secondary) {
+			if (ei != null)
+			    ei.setError("only one ':' separator allowed");
 			return false;
+		    }
 		    secondary = true;
 		    continue;
 		}
+		if (ei != null)
+		    ei.setError("unexpected '" + tok + "'");
 		return false;
 	    }
 	    allocNodes();
@@ -320,7 +366,7 @@ class CustomTransformerElm extends CircuitElm {
 		for (j = 0; j != i; j++)
 		    xformMatrix[i][j] = xformMatrix[j][i] = couplingCoef*Math.sqrt(coilInductances[i]*coilInductances[j])*coilPolarities[i]*coilPolarities[j];
 
-	    CirSim.invertMatrix(xformMatrix, coilCount);
+	    SimulationManager.invertMatrix(xformMatrix, coilCount);
 	    
 	    double ts = isTrapezoidal() ? sim.timeStep/2 : sim.timeStep;
 	    for (i = 0; i != coilCount; i++)
@@ -408,18 +454,22 @@ class CustomTransformerElm extends CircuitElm {
 	    return false;
 	}
 	
+	// VCCS stamps couple all nodes, so they must all be in the same matrix
+	boolean getMatrixConnection(int n1, int n2) { return true; }
+
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo("Base Inductance (H)", inductance, .01, 5);
+		return new EditInfo("Base Inductance (H)", inductance, .01, 5).setPositive();
 	    if (n == 1) {
 		EditInfo ei = new EditInfo(EditInfo.makeLink("customtransformer.html", "Description"), 0, -1, -1);
+		ei.setErrorFieldName("Description");
 		ei.text = description;
 		ei.disallowSliders();
 		return ei;
 	    }
 	    if (n == 2)
 		return new EditInfo("Coupling Coefficient", couplingCoef, 0, 1).
-		    setDimensionless();
+		    setDimensionless().setPositive();
 	    if (n == 3) {
 		EditInfo ei = new EditInfo("", 0, -1, -1);
 		ei.checkbox = new Checkbox("Trapezoidal Approximation",
@@ -436,17 +486,19 @@ class CustomTransformerElm extends CircuitElm {
 	    if (n == 1) {
 		String s = ei.textf.getText();
 		if (s != description) {
-		    if (!parseDescription(s)) {
+		    if (!parseDescription(s, ei)) {
 			parseDescription(description);
-			Window.alert("Parse error in description");
 		    } else
 			description = s;
 		    setPoints();
 		}
 	    }
-	    if (n == 2 && ei.value > 0 && ei.value < 1) {
-		couplingCoef = ei.value;
-		parseDescription();
+	    if (n == 2) {
+		if (ei.value > 0 && ei.value < 1) {
+		    couplingCoef = ei.value;
+		    parseDescription();
+		} else
+		    ei.setError("must be > 0 and < 1");
 	    }
 	    if (n == 3) {
 		if (ei.checkbox.getState())

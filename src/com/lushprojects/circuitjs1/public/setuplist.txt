@@ -54,6 +54,11 @@ transformerdc.txt Transformer w/ DC
 transformerup.txt Step-Up Transformer
 transformerdown.txt Step-Down Transformer
 longdist.txt Long-Distance Power Transmission
++Saturable Core
+satcore-inductor.txt Saturable vs Linear Inductor (DC)
+satcore-comparison.txt Low vs High Drive (AC Saturation)
+satcore-transformer.txt Transformer with Saturable Core
+-
 -
 +Relays
 relay.txt Relay
@@ -86,7 +91,7 @@ coupled3.txt LC Modes (3)
 ladder.txt LC Ladder
 -
 phaseseq.txt Phase-Sequence Network
-lissa.txt Lissajous Figures
+3phasewye.txt 3-Phase Wye-Wye Balanced Load
 -
 +Diodes
 diodevar.txt Diode
@@ -232,6 +237,7 @@ crystalosc.txt CMOS Crystal Oscillator
 555sequencer.txt Pulse Sequencer
 555schmitt.txt Schmitt Trigger (inverting)
 555missing.txt Missing Pulse Detector
+555dutycycle.txt Adjustable Duty Cycle Oscillator
 -
 +Active Filters
 filt-vcvs-lopass.txt VCVS Low-Pass Filter
@@ -328,6 +334,13 @@ ledflasher.txt LED Flasher
 traffic.txt Traffic Light
 sram.txt Static RAM
 dram.txt Dynamic RAM
++TD4 CPU
+td4.txt TD4 LED Strobe
+td4-ctr.txt TD4 Counter
+td4-ctr-dn.txt TD4 Down Counter
+td4-ctr-up-dn.txt TD4 Up-Down Counter
+td4-add2.txt TD4 Add 2
+-
 -
 +Analog/Digital
 flashadc.txt Flash ADC
@@ -366,6 +379,24 @@ tlmatch2.txt Impedance Matching (Shunt Stub)
 tlfreq.txt Stub Frequency Response
 tllopass.txt Low-Pass Filter
 tllight.txt Light Switch
+-
++Controlled Sources
+cs-resistor.txt VCCS Resistor
+cs-varyresistor.txt VCCS Varying Resistor
+cs-opamp.txt VCVS Op-Amp
+cs-opamprail.txt VCVS Op-Amp With Rails
+cs-multiplier.txt VCVS Multiplier
+cs-fullrectifier.txt VCVS Full Rectifier
+cs-ramp.txt VCVS Voltage Ramp
+cs-currentadder.txt Current Adder
+cs-integrator.txt VCVS Integrator
+cs-diff.txt VCVS Differentiator
+cs-varinduct.txt CCVS Variable Inductor
+cs-varicap.txt VCCS Variable Capacitor
+-
++Subcircuits
+fullrect-sc.txt Full Rectifier
+adder4-sc.txt Full Adder (nested)
 -
 +Misc Devices
 +JFETs
@@ -430,10 +461,22 @@ wienbridge.txt Wien Bridge Oscillator
 varactor.txt Varactor
 varactorvco.txt VCO
 -
++Norton Amplifier
+norton-invert.txt Norton Inverting Amplifier
+norton-noninvert.txt Norton Noninverting Amplifier
+norton-saw.txt Norton Sawtooth Oscillator
+-
 ledarray.txt LED Array
 triacdimmer.txt DIAC/TRIAC Dimmer
 ujtosc.txt Unijunction Oscillator
 3motor.txt 3-Phase Motor
 latchingrelay.txt Latching Relay
+gyratorelm.txt Gyrator
+-
++2-D Scope
+lissa.txt Lissajous Figures
+plot2d-checker.txt Checkerboard
+plot2d-color.txt Color Checkerboard
+plot2d-smile.txt Smiley
 -
 blank.txt Blank Circuit

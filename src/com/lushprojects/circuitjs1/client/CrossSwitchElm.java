@@ -41,21 +41,29 @@ package com.lushprojects.circuitjs1.client;
 	final int posCount = 2;
 	Point poleLeads[], throwLeads[], polePosts[], throwPosts[], linePoints[];
 	Point crossPoints[];
-        int voltageSources[];
+        VoltageSource voltageSources[];
         double currents[], curcounts[];
+
+	// voltageSources/currents/curcounts are normally (re)allocated in setPoints(), but elements
+	// inside a CompositeElm/subcircuit never get setPoints() called, so allocate lazily here too.
+	void ensureArrays() {
+	    if (voltageSources == null) {
+		voltageSources = new VoltageSource[poleCount];
+		currents = new double[poleCount];
+		curcounts = new double[poleCount];
+	    }
+	}
 
 	void setPoints() {
 	    super.setPoints();
 	    calcLeads(32);
-	    voltageSources = new int[poleCount];
+	    ensureArrays();
 	    throwPosts = newPointArray(2*poleCount);
 	    throwLeads = newPointArray(4*poleCount);
 	    poleLeads = newPointArray(poleCount);
 	    polePosts = newPointArray(poleCount);
 	    linePoints = newPointArray(2);
 	    crossPoints = newPointArray(6);
-	    currents = new double[poleCount];
-	    curcounts = new double[poleCount];
 	    int i;
 	    for (i = 0; i != poleCount; i++) {
 		int offset = -i*openhs*3;
@@ -156,8 +164,8 @@ package com.lushprojects.circuitjs1.client;
 	    return currents[1-n/2];
 	}
 
-	void setCurrent(int vn, double c) {
-	    if (vn == voltageSources[0])
+	void setCurrent(VoltageSource vs, double c) {
+	    if (vs == voltageSources[0])
 		currents[0] = c;
 	    else
 		currents[1] = c;
@@ -176,25 +184,41 @@ package com.lushprojects.circuitjs1.client;
 	}
 	int getPostCount() { return 2*poleCount; }
 	void calculateCurrent() {
+	    if (resistance > 0)
+		for (int i = 0; i != poleCount; i++) {
+		    int dst = (position == 0) ? i*2+1 : 3-i*2;
+		    currents[i] = (volts[i*2] - volts[dst]) / resistance;
+		}
 	}
 	
-        void setVoltageSource(int j, int vs) {
+        void setVoltageSource(int j, VoltageSource vs) {
+            ensureArrays();
             voltageSources[j] = vs;
+            vs.setNodes(nodes[j*2], nodes[j*2+1]);
         }
 
 	void stamp() {
+	    ensureArrays();
 	    int i;
 	    if (position == 0) {
-		for (i = 0; i != poleCount; i++)
-		    sim.stampVoltageSource(nodes[i*2], nodes[i*2+1], voltageSources[i], 0);
-	    } else {		
-		for (i = 0; i != poleCount; i++)
-		    sim.stampVoltageSource(nodes[i*2], nodes[3-i*2], voltageSources[i], 0);
+		for (i = 0; i != poleCount; i++) {
+		    if (resistance > 0)
+			sim.stampResistor(nodes[i*2], nodes[i*2+1], resistance);
+		    else
+			sim.stampVoltageSource(nodes[i*2], nodes[i*2+1], voltageSources[i], 0);
+		}
+	    } else {
+		for (i = 0; i != poleCount; i++) {
+		    if (resistance > 0)
+			sim.stampResistor(nodes[i*2], nodes[3-i*2], resistance);
+		    else
+			sim.stampVoltageSource(nodes[i*2], nodes[3-i*2], voltageSources[i], 0);
+		}
 	    }
 	}
-		
+
 	int getVoltageSourceCount() {
-	    return poleCount;
+	    return resistance > 0 ? 0 : poleCount;
 	}
 	
 	boolean getConnection(int n1, int n2) {
@@ -204,11 +228,12 @@ package com.lushprojects.circuitjs1.client;
 		return comparePair(n1, n2, 0, 3) || comparePair(n1, n2, 2, 1);
 	}
 	
-	boolean isWireEquivalent() { return true; }
+	boolean isWireEquivalent() { return resistance == 0; }
 	
 	// optimizing out this element is too complicated to be worth it (see #646)
 	boolean isRemovableWire() { return false; }
 
+	String getElmType() { return "cross switch"; }
 	void getInfo(String arr[]) {
 	    arr[0] = "cross switch";
 	    int i;
@@ -216,19 +241,44 @@ package com.lushprojects.circuitjs1.client;
 		arr[i+1] = "I" + (i+1) + " = " + getCurrentDText(currents[i]);
 	}
 	
+	boolean validate() {
+	    if (resistance > 0)
+		return true;
+	    for (int i = 0; i != poleCount; i++) {
+		int dst = (position == 0) ? i*2+1 : 3-i*2;
+		FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(i*2), sim);
+		if (fpi.findPath(getNode(dst))) {
+		    resistance = .001;
+		    return false;
+		}
+	    }
+	    return true;
+	}
+
 	int getShortcut() { return 0; }
 
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
 		return EditInfo.createCheckbox("IEC Symbol", useIECSymbol());
+	    if (n == 1)
+		return getKeyShortcutEditInfo();
+	    if (n == 2) {
+		EditInfo ei = new EditInfo("On Resistance (ohms)", resistance);
+		ei.setNonNegative();
+		return ei;
+	    }
 	    return null;
 	}
-	
+
 	public void setEditValue(int n, EditInfo ei) {
 	    if (n == 0) {
 		flags = ei.changeFlag(flags, FLAG_IEC);
 		setPoints();
 	    }
+	    if (n == 1)
+		setKeyShortcutEditValue(ei);
+	    if (n == 2)
+		resistance = ei.value;
 	}
 
     }

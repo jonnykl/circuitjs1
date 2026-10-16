@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class FuseElm extends CircuitElm {
@@ -44,6 +47,22 @@ class FuseElm extends CircuitElm {
 	}
 	String dump() {
 	    return super.dump() + " " + resistance + " " + i2t + " " + heat + " " + blown;
+	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "re", resistance);
+	    XMLSerializer.dumpAttr(elem, "i2", i2t);
+	    XMLSerializer.dumpAttr(elem, "he", heat);
+	    XMLSerializer.dumpAttr(elem, "bl", blown);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    resistance = xml.parseDoubleAttr("re", resistance);
+	    i2t = xml.parseDoubleAttr("i2", i2t);
+	    heat = xml.parseDoubleAttr("he", heat);
+	    blown = xml.parseBooleanAttr("bl", blown);
 	}
 	int getDumpType() { return 404; }
 
@@ -145,6 +164,7 @@ class FuseElm extends CircuitElm {
 	void doStep() {
 	    sim.stampResistor(nodes[0], nodes[1], blown ? blownResistance : resistance);
 	}
+	String getElmType() { return "fuse"; }
 	void getInfo(String arr[]) {
 	    arr[0] = blown ? "fuse (blown)" : "fuse";
 	    getBasicInfo(arr);
@@ -155,17 +175,17 @@ class FuseElm extends CircuitElm {
 	}
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo("I2t", i2t, 0, 0);
+		return new EditInfo("I2t", i2t, 0, 0).setPositive();
 	    if (n == 1)
-		return new EditInfo("Resistance", resistance, 0, 0);
+		return new EditInfo("Resistance", resistance, 0, 0).setPositive();
 	    if (n == 2)
 		return EditInfo.createCheckbox("IEC Symbol", isIECSymbol());
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
-	    if (n == 0 && ei.value > 0)
+	    if (n == 0)
 		i2t = ei.value;
-	    if (n == 1 && ei.value > 0)
+	    if (n == 1)
 		resistance = ei.value;
 	    if (n == 2) {
 		flags = ei.changeFlag(flags, FLAG_IEC_SYMBOL);

@@ -18,6 +18,8 @@
 */
 
 package com.lushprojects.circuitjs1.client;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
     class OpAmpElm extends CircuitElm {
 	int opsize, opheight, opwidth, opaddtext;
@@ -35,7 +37,7 @@ package com.lushprojects.circuitjs1.client;
 	    gbw = 1e6;
            flags = FLAG_GAIN; // need to do this before setSize()
 	    gain = 100000;
-           setSize(sim.smallGridCheckItem.getState() ? 1 : 2);
+           setSize(useSmallGrid() ? 1 : 2);
 	}
 	public OpAmpElm(int xa, int ya, int xb, int yb, int f,
 			StringTokenizer st) {
@@ -66,10 +68,25 @@ package com.lushprojects.circuitjs1.client;
 	    // gain was 1000, but it broke amp-schmitt.txt
 	    gain = ((flags & FLAG_LOWGAIN) != 0) ? 1000 : 100000;
 	}
-	String dump() {
-	    flags |= FLAG_GAIN;
-	    return super.dump() + " " + maxOut + " " + minOut + " " + gbw + " " + volts[0] + " " + volts[1] + " " + gain;
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "ma", maxOut);
+	    XMLSerializer.dumpAttr(elem, "mi", minOut);
+	    //XMLSerializer.dumpAttrib(elem, "gb", gbw);
+	    XMLSerializer.dumpAttr(elem, "ga", gain);
 	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    flags = 0; // size might have changed
+	    super.undumpXml(xml);
+	    maxOut = xml.parseDoubleAttr("ma", maxOut);
+	    minOut = xml.parseDoubleAttr("mi", minOut);
+	    //gbw = xml.parseDoubleAttr("gb", gbw);
+	    gain = xml.parseDoubleAttr("ga", gain);
+	    setSize((flags & FLAG_SMALL) != 0 ? 1 : 2);
+	}
+
 	boolean nonLinear() { return true; }
 	void draw(Graphics g) {
 	    setBbox(point1, point2, opheight*2);
@@ -101,7 +118,7 @@ package com.lushprojects.circuitjs1.client;
 	}
 	void setPoints() {
 	    super.setPoints();
-	    if (dn > 150 && this == sim.dragElm)
+	    if (dn > 150 && isCreating())
 		setSize(2);
 	    int ww = opwidth;
 	    if (ww > dn/2)
@@ -142,9 +159,8 @@ package com.lushprojects.circuitjs1.client;
 	double lastvd;
 
 	void stamp() {
-	    int vn = sim.nodeList.size()+voltSource;
-	    sim.stampNonLinear(vn);
-	    sim.stampMatrix(nodes[2], vn, 1);
+	    sim.stampNonLinear(voltSource);
+	    sim.stampMatrix(nodes[2], voltSource, 1);
 	}
 	void doStep() {
 	    double vd = volts[1] - volts[0];
@@ -154,14 +170,13 @@ package com.lushprojects.circuitjs1.client;
 	    else if (volts[2] > maxOut+.1 || volts[2] < minOut-.1)
 		sim.converged = false;
 	    double x = 0;
-	    int vn = sim.nodeList.size()+voltSource;
 	    double dx = 0;
 	    double maxAdj = maxOut-midpoint;
 	    double minAdj = minOut-midpoint;
-	    if (vd >= maxAdj/gain && (lastvd >= 0 || sim.getrand(4) == 1)) {
+	    if (vd >= maxAdj/gain && (lastvd >= 0 || app.getrand(4) == 1)) {
 		dx = 1e-4;
 		x = maxOut - dx*maxAdj/gain;
-	    } else if (vd <= minAdj/gain && (lastvd <= 0 || sim.getrand(4) == 1)) {
+	    } else if (vd <= minAdj/gain && (lastvd <= 0 || app.getrand(4) == 1)) {
 		dx = 1e-4;
 		x = minOut - dx*minAdj/gain;
 	    } else {
@@ -169,20 +184,22 @@ package com.lushprojects.circuitjs1.client;
 		x = midpoint;
 	    }
 	    //System.out.println("opamp " + vd + " " + volts[2] + " " + dx + " "  + x + " " + lastvd + " " + sim.converged);
-	    
+
 	    // newton-raphson
-	    sim.stampMatrix(vn, nodes[0], dx);
-	    sim.stampMatrix(vn, nodes[1], -dx);
-	    sim.stampMatrix(vn, nodes[2], 1);
-	    sim.stampRightSide(vn, x);
-	    
+	    sim.stampMatrix(voltSource, nodes[0], dx);
+	    sim.stampMatrix(voltSource, nodes[1], -dx);
+	    sim.stampMatrix(voltSource, nodes[2], 1);
+	    sim.stampRightSide(voltSource, x);
+
 	    lastvd = vd;
 	    /*if (sim.converged)
 	      System.out.println((volts[1]-volts[0]) + " " + volts[2] + " " + initvd);*/
 	}
 	// there is no current path through the op-amp inputs, but there
 	// is an indirect path through the output to ground.
+	boolean validate() { return validateRailNode(2); }
 	boolean getConnection(int n1, int n2) { return false; }
+	boolean getMatrixConnection(int n1, int n2) { return true; }
 	boolean hasGroundConnection(int n1) {
 	    return (n1 == 2);
 	}
@@ -194,7 +211,7 @@ package com.lushprojects.circuitjs1.client;
 	    if (n == 1)
 		return new EditInfo("Min Output (V)", minOut, -20, 0);
 	    if (n == 2)
-		return new EditInfo("Gain", gain, 10, 1000000);
+		return new EditInfo("Gain", gain, 10, 1000000).setPositive();
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
@@ -202,7 +219,7 @@ package com.lushprojects.circuitjs1.client;
 		maxOut = ei.value;
 	    if (n == 1)
 		minOut = ei.value;
-	    if (n == 2 && ei.value > 0)
+	    if (n == 2)
 		gain = ei.value;
 	}
 	int getShortcut() { return 'a'; }
@@ -230,4 +247,5 @@ package com.lushprojects.circuitjs1.client;
 	    super.flipXY(xmy, count);
 	}
 
+	void addRoutingObstacle(WireRouter router) { addRoutingObstacleWithLeads(router, opwidth); }
     }

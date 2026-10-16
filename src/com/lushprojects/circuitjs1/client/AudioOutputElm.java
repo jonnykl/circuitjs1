@@ -1,5 +1,8 @@
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import java.util.Date;
 
 import com.google.gwt.core.client.JsArrayInteger;
@@ -44,6 +47,22 @@ public class AudioOutputElm extends CircuitElm {
 	String dump() { 
 	    return super.dump() + " " + duration + " " + samplingRate + " " + labelNum;
 	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "du", duration);
+	    XMLSerializer.dumpAttr(elem, "sa", samplingRate);
+	    XMLSerializer.dumpAttr(elem, "la", labelNum);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    duration = xml.parseDoubleAttr("du", duration);
+	    samplingRate = xml.parseIntAttr("sa", samplingRate);
+	    labelNum = xml.parseIntAttr("la", labelNum);
+	    setDataCount();
+	    setButtonLabel();
+	}
 	
 	void draggingDone() {
 	    setTimeStep();
@@ -55,8 +74,7 @@ public class AudioOutputElm extends CircuitElm {
 	    int num = 1;
 	    if (sim.elmList == null)
 		return 0;
-	    for (i = 0; i != sim.elmList.size(); i++) {
-		CircuitElm ce = sim.getElm(i);
+	    for (CircuitElm ce : sim.elmList) {
 		if (!(ce instanceof AudioOutputElm))
 		    continue;
 		int ln = ((AudioOutputElm)ce).labelNum;
@@ -67,7 +85,9 @@ public class AudioOutputElm extends CircuitElm {
 	}
 	
 	int getDumpType() { return 211; }
+	String getXmlDumpType() { return "aout"; }
 	int getPostCount() { return 1; }
+
 	void reset() {
 	    dataPtr = 0;
 	    dataFull = false;
@@ -146,7 +166,7 @@ public class AudioOutputElm extends CircuitElm {
 	
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0) {
-		EditInfo ei = new EditInfo("Duration (s)", duration, 0, 5);
+		EditInfo ei = new EditInfo("Duration (s)", duration, 0, 5).setPositive();
 		return ei;
 	    }
 	    if (n == 1) {
@@ -218,11 +238,9 @@ public class AudioOutputElm extends CircuitElm {
 	}
 	
         void createButton() {
-            String label = "&#9654; " + Locale.LS("Play Audio");
-            if (labelNum > 1)
-        	label += " " + labelNum;
-            sim.addWidgetToVerticalPanel(button = new Button(label));
+            app.addWidgetToVerticalPanel(button = new Button(""));
             button.setStylePrimaryName("topButton");
+	    setButtonLabel();
             button.addClickHandler(new ClickHandler() {
         	public void onClick(ClickEvent event) {
         	    play();
@@ -230,8 +248,16 @@ public class AudioOutputElm extends CircuitElm {
             });
             
         }
+
+	void setButtonLabel() {
+            String label = "&#9654; " + Locale.LS("Play Audio");
+            if (labelNum > 1)
+        	label += " " + labelNum;
+	    button.setHTML(label);
+	}
+
         void delete() {
-            sim.removeWidgetFromVerticalPanel(button);
+            app.removeWidgetFromVerticalPanel(button);
             super.delete();
         }
         

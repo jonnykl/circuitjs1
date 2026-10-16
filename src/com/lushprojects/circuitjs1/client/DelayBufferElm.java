@@ -19,6 +19,8 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class DelayBufferElm extends CircuitElm {
@@ -42,12 +44,22 @@ class DelayBufferElm extends CircuitElm {
 		highVoltage = Double.parseDouble(st.nextToken());
 	    } catch (Exception e) {}
 	}
-	String dump() {
-	    return super.dump() + " " + delay + " " + threshold + " " + highVoltage;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "dl", delay);
+	    XMLSerializer.dumpAttr(elem, "th", threshold);
+	    XMLSerializer.dumpAttr(elem, "hv", highVoltage);
 	}
-	
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    delay = xml.parseDoubleAttr("dl", delay);
+	    threshold = xml.parseDoubleAttr("th", threshold);
+	    highVoltage = xml.parseDoubleAttr("hv", highVoltage);
+	}
+
 	int getDumpType() { return 422; }
-	
+	void setHighVoltage(double hv) { highVoltage = hv; }
+
 	Point center;
 	
 	void draw(Graphics g) {
@@ -87,7 +99,7 @@ class DelayBufferElm extends CircuitElm {
 	}
 	int getVoltageSourceCount() { return 1; }
 	void stamp() {
-	    sim.stampVoltageSource(0, nodes[1], voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[1], voltSource);
 	}
 	
 	double delayEndTime;
@@ -100,7 +112,7 @@ class DelayBufferElm extends CircuitElm {
 		    outState = inState;
 	    } else
 		delayEndTime = sim.t + delay;
-	    sim.updateVoltageSource(0, nodes[1], voltSource, outState ? highVoltage : 0);
+	    sim.updateVoltageSource(CircuitNode.ground, nodes[1], voltSource, outState ? highVoltage : 0);
 	}
 	double getVoltageDiff() { return volts[0]; }
 	void getInfo(String arr[]) {
@@ -115,7 +127,7 @@ class DelayBufferElm extends CircuitElm {
 	    if (n == 1)
 		return new EditInfo("Threshold (V)", threshold, 0, 0);
 	    if (n == 2)
-		return new EditInfo("High Logic Voltage", highVoltage, 0, 0);
+		return new EditInfo("High Logic Voltage", highVoltage, 0, 0).setUnitStep();
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {

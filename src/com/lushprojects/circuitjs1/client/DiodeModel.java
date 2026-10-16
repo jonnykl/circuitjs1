@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Vector;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 
 public class DiodeModel implements Editable, Comparable<DiodeModel> {
 
@@ -87,9 +89,14 @@ public class DiodeModel implements Editable, Comparable<DiodeModel> {
 	// default for newly created LEDs, https://www.diyaudio.com/forums/software-tools/25884-spice-models-led.html
 	addDefaultModel("default-led", new DiodeModel(93.2e-12, .042, 3.73, 0, null));
 
+	addDefaultModel("default-optocoupler-led", new DiodeModel(1.714e-7, 0., 4.077, 0., null));
+
 	// https://www.allaboutcircuits.com/textbook/semiconductors/chpt-3/spice-models/
 	addDefaultModel("1N5711", new DiodeModel(315e-9, 2.8, 2.03, 70, "Schottky"));
 	addDefaultModel("1N5712", new DiodeModel(680e-12, 12, 1.003, 20, "Schottky"));
+
+	// https://github.com/peteut/spice-models/blob/master/nxp/sbd/sbd.txt
+	addDefaultModel("BAT85", new DiodeModel(2.076e-7, 2.326, 1.023, 33, "Schottky"));
 
 	// model is inaccurate
 	addDefaultModel("1N34", new DiodeModel(200e-12, 84e-3, 2.19, 60, "germanium").setInternal());
@@ -239,6 +246,25 @@ public class DiodeModel implements Editable, Comparable<DiodeModel> {
 	updateModel();
     }
     
+    static DiodeModel undumpModelXml(XMLDeserializer xml) {
+	String name = xml.parseStringAttr("nm", null);
+	DiodeModel dm = DiodeModel.getModelWithName(name);
+	dm.undumpXml(xml);
+	return dm;
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        flags = xml.parseIntAttr("f", flags);
+	saturationCurrent = xml.parseDoubleAttr("is", saturationCurrent);
+	seriesResistance = xml.parseDoubleAttr("rs", seriesResistance);
+	emissionCoefficient = xml.parseDoubleAttr("n", emissionCoefficient);
+	breakdownVoltage = xml.parseDoubleAttr("bv", breakdownVoltage);
+	forwardCurrent = xml.parseDoubleAttr("fi", forwardCurrent);
+	updateModel();
+    }
+
+    public String getDialogTitle() { return "Edit Diode Model"; }
+
     public EditInfo getEditInfo(int n) {
 	if (n == 0) {
 	    EditInfo ei = new EditInfo("Model Name", 0);
@@ -286,7 +312,7 @@ public class DiodeModel implements Editable, Comparable<DiodeModel> {
 	if (n == 4)
 	    breakdownVoltage = Math.abs(ei.value);
 	updateModel();
-	CirSim.theSim.updateModels();
+	CirSim.theApp.updateModels();
     }
 
     // set emission coefficient for simple mode if we have enough data  
@@ -314,6 +340,20 @@ public class DiodeModel implements Editable, Comparable<DiodeModel> {
 	return "34 " + CustomLogicModel.escape(name) + " " + flags + " " + saturationCurrent + " " + seriesResistance + " " + emissionCoefficient + " " + breakdownVoltage + " " + forwardCurrent;
     }
     
+    void dumpXml(Document doc) {
+	dumped = true;
+        Element elem = doc.createElement("dm");
+        XMLSerializer.dumpAttr(elem, "nm", name);
+        XMLSerializer.dumpAttr(elem, "f", flags);
+        XMLSerializer.dumpAttr(elem, "is", saturationCurrent);
+        XMLSerializer.dumpAttr(elem, "rs", seriesResistance);
+        XMLSerializer.dumpAttr(elem, "n", emissionCoefficient);
+        XMLSerializer.dumpAttr(elem, "bv", breakdownVoltage);
+	if (forwardCurrent > 0)
+	    XMLSerializer.dumpAttr(elem, "fi", forwardCurrent);
+	doc.getDocumentElement().appendChild(elem);
+    }
+
     boolean isSimple() {
 	return (flags & FLAGS_SIMPLE) != 0;
     }

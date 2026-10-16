@@ -24,7 +24,7 @@ import java.util.Vector;
 class CCVSElm extends VCCSElm {
     	static int FLAG_SPICE = 2;
     	VoltageElm voltageSources[];
-    	int outputVS;
+    	VoltageSource outputVS;
     
 	public CCVSElm(int xa, int ya, int xb, int yb, int f,
 		      StringTokenizer st) {
@@ -72,37 +72,41 @@ class CCVSElm extends VCCSElm {
 	    } else {
 		// voltage source (0V) between C+ and C- so we can measure current
 		for (i = 0; i != inputCount; i += 2) {
-		    int vn1 = pins[i+1].voltSource;
+		    VoltageSource vn1 = pins[i+1].voltSource;
 		    sim.stampVoltageSource(nodes[i], nodes[i+1], vn1, 0);
 		}
 	    }
-	    
+
 	    // voltage source for outputs
-	    int vn2 = pins[inputCount].voltSource;
+	    VoltageSource vn2 = pins[inputCount].voltSource;
             outputVS = vn2;
-            sim.stampNonLinear(vn2 + sim.nodeList.size());
+            sim.stampNonLinear(vn2);
             sim.stampVoltageSource(nodes[inputCount+1], nodes[inputCount], vn2);
 	}
 
 	double lastCurrents[];
+	double lastOutput;
 	
         void doStep() {
-            // converged yet?
-            double convergeLimit = getConvergeLimit()*.1;
-            
             int i;
             if (isSpiceStyle()) {
                 for (i = 0; i != inputPairCount; i++)
                     pins[i*2+1].current = voltageSources[i].getCurrent();
             }
             
+            // converged yet?
+            double convergeLimitCurrent = getConvergeLimit()*.1;
             for (i = 0; i != inputPairCount; i++) {
         	double cur = pins[i*2+1].current;
-        	if (Math.abs(cur-lastCurrents[i]) > convergeLimit)
+        	if (Math.abs(cur-lastCurrents[i]) > convergeLimitCurrent)
         	    sim.converged = false;
             }
             
-            int vno = outputVS + sim.nodeList.size();
+            double convergeLimitVoltage = getConvergeLimit();
+	    if (Math.abs((volts[inputCount]-volts[inputCount+1])-lastOutput) > convergeLimitVoltage)
+		sim.converged = false;
+
+            VoltageSource vno = outputVS;
             if (expr != null) {
         	// calculate output
         	for (i = 0; i != inputPairCount; i++)
@@ -110,13 +114,14 @@ class CCVSElm extends VCCSElm {
         	exprState.t = sim.t;
         	double v0 = expr.eval(exprState);
         	double rs = v0;
-        	
+
         	for (i = 0; i != inputPairCount; i++) {
         	    double cur = pins[i*2+1].current;
         	    double dv = cur-lastCurrents[i];
-                    int vni = pins[i*2+1].voltSource + sim.nodeList.size();
+                    VoltageSource vni = pins[i*2+1].voltSource;
         	    if (Math.abs(dv) < 1e-6)
         		dv = 1e-6;
+		    dv = 1e-9;
         	    setCurrentExprValue(i, cur);
         	    double v = expr.eval(exprState);
         	    setCurrentExprValue(i, cur-dv);
@@ -132,14 +137,18 @@ class CCVSElm extends VCCSElm {
         	    setCurrentExprValue(i, cur);
         	}
         	sim.stampRightSide(vno, rs);
+		//sim.console("stamping rs=" + rs + " dx=" + dx + " iter=" + sim.subIterations + " " + sim.converged + " " + lastOutput);
             }
 
             for (i = 0; i != inputPairCount; i++)
         	lastCurrents[i] = pins[i*2+1].current;
+	    lastOutput = volts[inputCount]-volts[inputCount+1];
         }
 	
         void stepFinished() {
             exprState.updateLastValues(volts[inputCount]-volts[inputCount+1]);
+	    for (int i = 0; i != inputPairCount; i++)
+		    exprState.lastValues[i] = pins[i*2+1].current;
         }
 
         void setCurrentExprValue(int n, double cur) {
@@ -157,19 +166,19 @@ class CCVSElm extends VCCSElm {
 	}
         boolean hasCurrentOutput() { return false; }
         boolean isSpiceStyle() { return (flags & FLAG_SPICE) != 0; }
-	
-        void setCurrent(int vn, double c) {
+
+        void setCurrent(VoltageSource vs, double c) {
             int i = 0;
             if (!isSpiceStyle()) {
         	for (i = 0; i != inputCount; i += 2)
-        	    if (pins[i+1].voltSource == vn) {
+        	    if (pins[i+1].voltSource == vs) {
         		pins[i].current = -c;
         		pins[i+1].current = c;
         		return;
         	    }
             } else
         	i = inputCount;
-            if (pins[i].voltSource == vn) {
+            if (pins[i].voltSource == vs) {
                 pins[i].current = c;
                 pins[i+1].current = -c;
             }
@@ -207,11 +216,17 @@ class CCVSElm extends VCCSElm {
             }
         }
         
-	void setVoltageSource(int j, int vs) {
-	    if (isSpiceStyle())
+	void setVoltageSource(int j, VoltageSource vs) {
+	    if (isSpiceStyle()) {
 		pins[inputCount].voltSource = vs;
-	    else
+		vs.setNodes(nodes[inputCount+1], nodes[inputCount]);
+	    } else {
 		super.setVoltageSource(j, vs);
+		if (j < inputPairCount)
+		    vs.setNodes(nodes[j*2], nodes[j*2+1]);
+		else
+		    vs.setNodes(nodes[inputCount+1], nodes[inputCount]);
+	    }
 	}
 
         void getInfo(String arr[]) {

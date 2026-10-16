@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class LampElm extends CircuitElm {
@@ -49,6 +52,24 @@ class LampElm extends CircuitElm {
 	String dump() {
 	    return super.dump() + " " + temp + " " + nom_pow + " " + nom_v +
 		" " + warmTime + " " + coolTime;
+	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "te", temp);
+	    XMLSerializer.dumpAttr(elem, "np", nom_pow);
+	    XMLSerializer.dumpAttr(elem, "nv", nom_v);
+	    XMLSerializer.dumpAttr(elem, "wa", warmTime);
+	    XMLSerializer.dumpAttr(elem, "co", coolTime);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    temp = xml.parseDoubleAttr("te", temp);
+	    nom_pow = xml.parseDoubleAttr("np", nom_pow);
+	    nom_v = xml.parseDoubleAttr("nv", nom_v);
+	    warmTime = xml.parseDoubleAttr("wa", warmTime);
+	    coolTime = xml.parseDoubleAttr("co", coolTime);
 	}
 	int getDumpType() { return 181; }
 
@@ -119,7 +140,7 @@ class LampElm extends CircuitElm {
 	    setVoltageColor(g, (v1+v2)*.5);
 	    drawThickLine(g, filament[0], filament[1]);
 	    updateDotCount();
-	    if (sim.dragElm != this) {
+	    if (!isCreating()) {
 		drawDots(g, point1, lead1, curcount);
 		double cc = addCurCount(curcount, (dn-16)/2);
 		drawDots(g, lead1,  filament[0], cc);
@@ -174,13 +195,13 @@ class LampElm extends CircuitElm {
 	public EditInfo getEditInfo(int n) {
 	    // ohmString doesn't work here on linux
 	    if (n == 0)
-		return new EditInfo("Nominal Power", nom_pow, 0, 0);
+		return new EditInfo("Nominal Power", nom_pow, 0, 0).setPositive();
 	    if (n == 1)
-		return new EditInfo("Nominal Voltage", nom_v, 0, 0);
+		return new EditInfo("Nominal Voltage", nom_v, 0, 0).setPositive().setUnitStep();
 	    if (n == 2)
-		return new EditInfo("Warmup Time (s)", warmTime, 0, 0);
+		return new EditInfo("Warmup Time (s)", warmTime, 0, 0).setPositive();
 	    if (n == 3)
-		return new EditInfo("Cooldown Time (s)", coolTime, 0, 0);
+		return new EditInfo("Cooldown Time (s)", coolTime, 0, 0).setPositive();
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {

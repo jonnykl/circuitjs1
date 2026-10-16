@@ -19,7 +19,10 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class LogicInputElm extends SwitchElm {
+    import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class LogicInputElm extends SwitchElm {
 	final int FLAG_TERNARY = 1;
 	final int FLAG_NUMERIC = 2;
 	double hiV, loV;
@@ -48,6 +51,21 @@ package com.lushprojects.circuitjs1.client;
 	String dump() {
 	    return super.dump() + " " + hiV + " " + loV;
 	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    if (hiV != 5)
+		XMLSerializer.dumpAttr(elem, "hi", hiV);
+	    if (loV != 0)
+		XMLSerializer.dumpAttr(elem, "lo", loV);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    hiV = xml.parseDoubleAttr("hi", hiV);
+	    loV = xml.parseDoubleAttr("lo", loV);
+	}
+
 	int getPostCount() { return 1; }
 	void setPoints() {
 	    super.setPoints();
@@ -75,10 +93,10 @@ package com.lushprojects.circuitjs1.client;
 	    return new Rectangle(x2-10, y2-10, 20, 20);
 	}	
 
-	void setCurrent(int vs, double c) { current = c; }
+	void setCurrent(VoltageSource vs, double c) { current = c; }
 	void calculateCurrent() {}
 	void stamp() {
-	    sim.stampVoltageSource(0, nodes[0], voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[0], voltSource);
 	}
 	
 	boolean isWireEquivalent() { return false; }
@@ -88,10 +106,11 @@ package com.lushprojects.circuitjs1.client;
 	    double v = (position == 0) ? loV : hiV;
 	    if (isTernary())
 		v = loV + position * (hiV-loV) * .5;
-	    sim.updateVoltageSource(0, nodes[0], voltSource, v);
+	    sim.updateVoltageSource(CircuitNode.ground, nodes[0], voltSource, v);
 	}
 	int getVoltageSourceCount() { return 1; }
 	double getVoltageDiff() { return volts[0]; }
+	String getElmType() { return "logic input"; }
 	void getInfo(String arr[]) {
 	    arr[0] = "logic input";
 	    arr[1] = (position == 0) ? "low" : "high";
@@ -108,9 +127,9 @@ package com.lushprojects.circuitjs1.client;
 		return ei;
 	    }
 	    if (n == 1)
-		return new EditInfo("High Logic Voltage", hiV, 10, -10);
+		return new EditInfo("High Logic Voltage", hiV, 10, -10).setUnitStep();
 	    if (n == 2)
-		return new EditInfo("Low Voltage", loV, 10, -10);
+		return new EditInfo("Low Voltage", loV, 10, -10).setUnitStep();
 	    if (n == 3) {
 		EditInfo ei = new EditInfo("", 0, 0, 0);
 		ei.checkbox = new Checkbox("Numeric", isNumeric());
@@ -121,6 +140,8 @@ package com.lushprojects.circuitjs1.client;
 		ei.checkbox = new Checkbox("Ternary", isTernary());
 		return ei;
 	    }
+	    if (n == 5)
+		return getKeyShortcutEditInfo();
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
@@ -143,10 +164,18 @@ package com.lushprojects.circuitjs1.client;
 		    flags &= ~FLAG_TERNARY;
 		posCount = (isTernary()) ? 3 : 2;
 	    }
+	    if (n == 5)
+		setKeyShortcutEditValue(ei);
 	}
+	void addRoutingObstacle(WireRouter router) {
+	    router.addWire(point1.x, point1.y, lead1.x, lead1.y);
+	    router.addObstacle(x2 - 10, y2 - 10, x2 + 10, y2 + 10);
+	}
+
 	int getShortcut() { return 'i'; }
 	
 	double getCurrentIntoNode(int n) {
 	    return current;
 	}
+	boolean validate() { return validateRailNode(0); }
     }

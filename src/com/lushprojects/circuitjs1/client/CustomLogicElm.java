@@ -2,6 +2,8 @@ package com.lushprojects.circuitjs1.client;
 
 import com.google.gwt.user.client.ui.Button;
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 
 public class CustomLogicElm extends ChipElm {
     String modelName;
@@ -33,27 +35,19 @@ public class CustomLogicElm extends ChipElm {
 	}
     }
     
-    String dump() {
-	String s = super.dump();
-	s += " " + CustomLogicModel.escape(modelName);
+    void dumpXml(Document doc, Element elem) {
+	if (!model.dumped)
+	    model.dumpXml(doc);
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "mo", modelName);
+    }
 
-	// the code to do this in ChipElm doesn't work here because we don't know
-	// how many pins to read until we read the model name!  So we have to
-	// duplicate it here.
-        int i;
-        for (i = 0; i != getPostCount(); i++) {
-            if (pins[i].output)
-                s += " " + volts[i];
-        }
-	return s;
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	modelName = xml.parseStringAttr("mo", null);
+	updateModels();
     }
-    
-    String dumpModel() {
-	if (model.dumped)
-	    return "";
-	return model.dump();
-    }
-    
+
     public void updateModels() {
 	model = CustomLogicModel.getModelWithNameOrCopy(modelName, model);
 	setupPins();
@@ -117,7 +111,7 @@ public class CustomLogicElm extends ChipElm {
 	for (i = 0; i != getPostCount(); i++) {
 	    Pin p = pins[i];
 	    if (p.output) {
-		sim.stampVoltageSource(0, nodes[i+add], p.voltSource);
+		sim.stampVoltageSource(CircuitNode.ground, nodes[i+add], p.voltSource);
 		if (hasTriState()) {
 		    sim.stampNonLinear(nodes[i+add]);
 		    sim.stampNonLinear(nodes[i]);
@@ -127,20 +121,13 @@ public class CustomLogicElm extends ChipElm {
     }
     
     void doStep() {
-	int i;
-	for (i = 0; i != getPostCount(); i++) {
-	    Pin p = pins[i];
-	    if (!p.output)
-		p.value = volts[i] > getThreshold();
-	}
-	execute();
 	int add = (hasTriState()) ? outputCount : 0;
-	for (i = 0; i != getPostCount(); i++) {
+	for (int i = 0; i != getPostCount(); i++) {
 	    Pin p = pins[i];
 	    if (p.output) {
 		// connect output voltage source (to internal node if tri-state, otherwise connect directly to output)
-		sim.updateVoltageSource(0, nodes[i+add], p.voltSource, p.value ? highVoltage : 0);
-		
+		sim.updateVoltageSource(CircuitNode.ground, nodes[i+add], p.voltSource, p.value ? highVoltage : 0);
+
 		// add resistor for tri-state if necessary
 		if (hasTriState())
 		    sim.stampResistor(nodes[i+add], nodes[i], highImpedance[i] ? 1e8 : 1e-3);
@@ -245,7 +232,7 @@ public class CustomLogicElm extends ChipElm {
 	    return;
 	}
 	if (n == 1) {
-	    EditDialog editDialog = new EditDialog(model, sim);
+	    EditDialog editDialog = new EditDialog(model, app);
 	    CirSim.customLogicEditDialog = editDialog;
 	    editDialog.show();
 	    return;
@@ -253,7 +240,9 @@ public class CustomLogicElm extends ChipElm {
     }
     
     int getDumpType() { return 208; }
+    String getXmlDumpType() { return "cl"; }
 
+    String getElmType() { return "custom logic"; }
     void getInfo(String arr[]) {
 	super.getInfo(arr);
 	arr[0] = model.infoText;

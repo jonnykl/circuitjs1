@@ -19,9 +19,12 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class MBBSwitchElm extends SwitchElm {
+    import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class MBBSwitchElm extends SwitchElm {
 	int link;
-	int voltSources[];
+	VoltageSource voltSources[];
 	double currents[];
 	double curcounts[];
 	boolean both;
@@ -33,7 +36,7 @@ package com.lushprojects.circuitjs1.client;
 	
 	void setup() {
 	    noDiagonal = true;
-	    voltSources = new int[2];
+	    voltSources = new VoltageSource[2];
 	    currents = new double[2];
 	    curcounts = new double[3];
 	}
@@ -46,8 +49,15 @@ package com.lushprojects.circuitjs1.client;
 	}
 	
 	int getDumpType() { return 416; }
-	String dump() {
-	    return super.dump() + " " + link;
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "li", link);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    link = xml.parseIntAttr("li", link);
 	}
 
 	final int openhs = 16;
@@ -120,33 +130,53 @@ package com.lushprojects.circuitjs1.client;
 	
 	int getPostCount() { return 3; }
 	
-	void setCurrent(int vn, double c) {
-	    // set current for voltage source vn to c
-	    if (vn == voltSources[0])
+	void setCurrent(VoltageSource vs, double c) {
+	    // set current for voltage source vs to c
+	    if (vs == voltSources[0])
 		currents[both ? 0 : position/2] = c;
-	    else if (vn == voltSources[1])
+	    else if (vs == voltSources[1])
 		currents[1] = c;
 	}
 	void calculateCurrent() {
+	    if (resistance > 0) {
+		currents[0] = (both || position == 0) ? (volts[0] - volts[1]) / resistance : 0;
+		currents[1] = (both || position == 2) ? (volts[0] - volts[2]) / resistance : 0;
+		return;
+	    }
 	    // make sure current of unconnected pole is zero
 	    if (!both)
 		currents[1-(position/2)] = 0;
 	}
-	void setVoltageSource(int n, int v) {
+	void setVoltageSource(int n, VoltageSource v) {
 	    voltSources[n] = v;
+	    if (both)
+		v.setNodes(nodes[0], nodes[n+1]);
+	    else if (position == 0)
+		v.setNodes(nodes[0], nodes[1]);
+	    else
+		v.setNodes(nodes[0], nodes[2]);
 	}
 	void stamp() {
+	    if (resistance > 0) {
+		if (both || position == 0)
+		    sim.stampResistor(nodes[0], nodes[1], resistance);
+		if (both || position == 2)
+		    sim.stampResistor(nodes[0], nodes[2], resistance);
+		return;
+	    }
 	    int vs = 0;
 	    if (both || position == 0)
-		sim.stampVoltageSource(nodes[0], nodes[1], voltSources[vs++], 0);
+		sim.stampVoltageSource(voltSources[vs++], 0);
 	    if (both || position == 2)
-		sim.stampVoltageSource(nodes[0], nodes[2], voltSources[vs++], 0);
+		sim.stampVoltageSource(voltSources[vs++], 0);
 	}
-	
+
 	// connection is implemented by voltage source with voltage = 0.
 	// need two for both loads connected, otherwise one.
 	int getVoltageSourceCount() {
 	    both = (position == 1 || position == 3);
+	    if (resistance > 0)
+		return 0;
 	    return (both) ? 2 : 1;
 	}
 	void toggle() {
@@ -172,8 +202,9 @@ package com.lushprojects.circuitjs1.client;
 	// do not optimize out, even though isWireEquivalent() is true (because it may have 3 nodes to merge
 	// and calcWireClosure() doesn't handle that case)
 	boolean isRemovableWire() { return false; }
-	boolean isWireEquivalent() { return true; }
+	boolean isWireEquivalent() { return resistance == 0; }
 	
+	String getElmType() { return "switch (SPDT, MBB)"; }
 	void getInfo(String arr[]) {
 	    arr[0] = "switch (" + (link == 0 ? "S" : "D") + "PDT, MBB)";
 	    arr[1] = "I = " + getCurrentDText(getCurrent());
@@ -181,13 +212,47 @@ package com.lushprojects.circuitjs1.client;
 	public EditInfo getEditInfo(int n) {
 	    if (n == 1)
 	    	return new EditInfo("Switch Group", link, 0, 100).setDimensionless();
-	    return super.getEditInfo(n);
+	    if (n == 0)
+		return super.getEditInfo(n);
+	    if (n == 2)
+		return getKeyShortcutEditInfo();
+	    if (n == 3) {
+		EditInfo ei = new EditInfo("On Resistance (ohms)", resistance);
+		ei.setNonNegative();
+		return ei;
+	    }
+	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
 	    if (n == 1) {
 	    	link = (int) ei.value;
-	    } else
+	    } else if (n == 2)
+	    	setKeyShortcutEditValue(ei);
+	    else if (n == 3)
+		resistance = ei.value;
+	    else
 	    	super.setEditValue(n, ei);
 	}
+	boolean validate() {
+	    if (resistance > 0)
+		return true;
+	    boolean b = (position == 1 || position == 3);
+	    if (b || position == 0) {
+		FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(0), sim);
+		if (fpi.findPath(getNode(1))) {
+		    resistance = .001;
+		    return false;
+		}
+	    }
+	    if (b || position == 2) {
+		FindPathInfo fpi = new FindPathInfo(FindPathInfo.VOLTAGE, this, getNode(0), sim);
+		if (fpi.findPath(getNode(2))) {
+		    resistance = .001;
+		    return false;
+		}
+	    }
+	    return true;
+	}
+
 	int getShortcut() { return 0; }
     }

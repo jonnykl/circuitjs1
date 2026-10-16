@@ -19,14 +19,20 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 // SPST switch
 class SwitchElm extends CircuitElm {
     boolean momentary;
     // position 0 == closed, position 1 == open
     int position, posCount;
+    double resistance;
+    static final double COMPOSITE_CLOSED_R = 0.001;
     final int FLAG_IEC = 2;
     final int FLAG_LABEL = 4;
     String label;
+    String keyShortcut;
     
     public SwitchElm(int xx, int yy) {
 	super(xx, yy);
@@ -34,6 +40,7 @@ class SwitchElm extends CircuitElm {
 	position = 0;
 	posCount = 2;
 	label = null;
+	keyShortcut = null;
     }
     SwitchElm(int xx, int yy, boolean mm) {
 	super(xx, yy);
@@ -41,6 +48,7 @@ class SwitchElm extends CircuitElm {
 	momentary = mm;
 	posCount = 2;
 	label = null;
+	keyShortcut = null;
     }
     public SwitchElm(int xa, int ya, int xb, int yb, int f,
 		     StringTokenizer st) {
@@ -59,11 +67,28 @@ class SwitchElm extends CircuitElm {
 	    label = CustomLogicModel.unescape(st.nextToken());
     }
     int getDumpType() { return 's'; }
-    String dump() {
-	String s = super.dump() + " " + position + " " + momentary;
-	if ((flags & FLAG_LABEL) != 0)
-	    s += " " + CustomLogicModel.escape(label);
-	return s;
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+	if (position != 0)
+	    XMLSerializer.dumpAttr(elem, "p", position);
+	if (momentary)
+            XMLSerializer.dumpAttr(elem, "mm", momentary);
+	if (label != null)
+            XMLSerializer.dumpAttr(elem, "lab", label);
+	if (keyShortcut != null)
+	    XMLSerializer.dumpAttr(elem, "key", keyShortcut);
+	if (resistance != 0)
+	    XMLSerializer.dumpAttr(elem, "r", resistance);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        position = xml.parseIntAttr("p", position);
+        momentary = xml.parseBooleanAttr("mm", momentary);
+        label = xml.parseStringAttr("lab", label);
+        keyShortcut = xml.parseStringAttr("key", keyShortcut);
+        resistance = xml.parseDoubleAttr("r", 0);
     }
 
     Point ps, ps2;
@@ -146,6 +171,10 @@ class SwitchElm extends CircuitElm {
     void calculateCurrent() {
 	if (position == 1)
 	    current = 0;
+	else if (resistance > 0)
+	    current = (volts[0] - volts[1]) / resistance;
+	else if (parent != null)
+	    current = (volts[0] - volts[1]) / COMPOSITE_CLOSED_R;
     }
     
     void mouseUp() {
@@ -160,6 +189,7 @@ class SwitchElm extends CircuitElm {
     }
     
     void toggle() {
+	TestManager.recordSwitchToggle(this);
 	simpleToggle();
         if (label != null) {
             int i;
@@ -173,6 +203,7 @@ class SwitchElm extends CircuitElm {
             }
         }
     }
+    String getElmType() { return "switch (SPST)"; }
     void getInfo(String arr[]) {
 	arr[0] = (momentary) ? "push switch (SPST)" : "switch (SPST)";
 	if (position == 1) {
@@ -185,8 +216,17 @@ class SwitchElm extends CircuitElm {
 	}
     }
     boolean getConnection(int n1, int n2) { return position == 0; }
-    boolean isWireEquivalent() { return position == 0; }
-    boolean isRemovableWire() { return position == 0; }
+    boolean isWireEquivalent() { return position == 0 && parent == null && resistance == 0; }
+    boolean isRemovableWire() { return position == 0 && parent == null && resistance == 0; }
+
+    void stamp() {
+	if (position == 0) {
+	    if (resistance > 0)
+		sim.stampResistor(nodes[0], nodes[1], resistance);
+	    else if (parent != null)
+		sim.stampResistor(nodes[0], nodes[1], COMPOSITE_CLOSED_R);
+	}
+    }
     boolean useIECSymbol() { return (flags & FLAG_IEC) != 0; }
     
     public EditInfo getEditInfo(int n) {
@@ -199,6 +239,13 @@ class SwitchElm extends CircuitElm {
 	    return EditInfo.createCheckbox("IEC Symbol", useIECSymbol());
         if (n == 2)
             return new EditInfo("Label (for linking)", label == null ? "" : label);
+	if (n == 3)
+	    return getKeyShortcutEditInfo();
+	if (n == 4) {
+	    EditInfo ei = new EditInfo("On Resistance (ohms)", resistance);
+	    ei.setNonNegative();
+	    return ei;
+	}
 	return null;
     }
     public void setEditValue(int n, EditInfo ei) {
@@ -215,6 +262,32 @@ class SwitchElm extends CircuitElm {
         	flags &= ~FLAG_LABEL;
             } else
         	flags |= FLAG_LABEL;
+        }
+	if (n == 3)
+	    setKeyShortcutEditValue(ei);
+	if (n == 4)
+	    resistance = ei.value;
+    }
+
+    // helper methods for keyboard shortcut edit field, usable by subclasses
+    EditInfo getKeyShortcutEditInfo() {
+	return new EditInfo("Keyboard Shortcut", keyShortcut == null ? "" : keyShortcut);
+    }
+
+    void setKeyShortcutEditValue(EditInfo ei) {
+	String s = ei.textf.getText().trim();
+	if (s.length() == 0)
+	    keyShortcut = null;
+	else
+	    keyShortcut = s.substring(0, 1).toLowerCase();
+    }
+
+    void addRoutingObstacle(WireRouter router) {
+        if (x == x2 || y == y2) {
+            router.addWire(x, y, x2, y2);
+            Point pa = interpPoint(lead1, lead2, 0, 0);
+            Point pb = interpPoint(lead1, lead2, 1, openhs);
+            router.addObstacle(pa.x, pa.y, pb.x, pb.y);
         }
     }
 

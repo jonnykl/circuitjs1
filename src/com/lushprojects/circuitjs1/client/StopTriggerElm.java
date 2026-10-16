@@ -19,17 +19,23 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class StopTriggerElm extends CircuitElm {
 	double triggerVoltage;
-	boolean triggered, stopped;
+	boolean triggered, stopped, conditionActive, durationMet;
 	double delay, triggerTime;
+	double requiredDuration, conditionStartTime;
 	int type;
-	
+	int count;
+	int triggerCount;
+
 	public StopTriggerElm(int xx, int yy) {
 	    super(xx, yy);
 	    triggerVoltage = 1;
+	    count = 1;
 	}
 	public StopTriggerElm(int xa, int ya, int xb, int yb, int f,
 			 StringTokenizer st) {
@@ -37,10 +43,31 @@ class StopTriggerElm extends CircuitElm {
 	    triggerVoltage = Double.parseDouble(st.nextToken());
 	    type = Integer.parseInt(st.nextToken());
 	    delay = Double.parseDouble(st.nextToken());
+	    count = 1;
 	}
-	String dump() { return super.dump() + " " + triggerVoltage + " " + type + " " + delay; }
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "tv", triggerVoltage);
+	    XMLSerializer.dumpAttr(elem, "tp", type);
+	    XMLSerializer.dumpAttr(elem, "dl", delay);
+	    XMLSerializer.dumpAttr(elem, "ct", count);
+	    XMLSerializer.dumpAttr(elem, "rd", requiredDuration);
+	}
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    triggerVoltage = xml.parseDoubleAttr("tv", triggerVoltage);
+	    type = xml.parseIntAttr("tp", type);
+	    delay = xml.parseDoubleAttr("dl", delay);
+	    count = xml.parseIntAttr("ct", 1);
+	    if (count < 1)
+		count = 1;
+	    requiredDuration = xml.parseDoubleAttr("rd", 0);
+	}
 	void reset() {
 	    triggered = false;
+	    conditionActive = false;
+	    durationMet = false;
+	    triggerCount = 0;
 	}
 	int getDumpType() { return 408; }
 	int getPostCount() { return 1; }
@@ -67,14 +94,27 @@ class StopTriggerElm extends CircuitElm {
 	}
 	void stepFinished() {
 	    stopped = false;
-	    if (!triggered && ((type == 0 && volts[0] >= triggerVoltage) || (type == 1 && volts[0] <= triggerVoltage))) {
-		triggered = true;
-		triggerTime = sim.t;
+	    boolean condition = (type == 0 && volts[0] >= triggerVoltage) || (type == 1 && volts[0] <= triggerVoltage);
+	    if (!conditionActive && condition) {
+		conditionActive = true;
+		conditionStartTime = sim.t;
+		durationMet = false;
 	    }
+	    if (conditionActive && condition && !durationMet && sim.t-conditionStartTime >= requiredDuration) {
+		durationMet = true;
+		triggerCount++;
+		if (!triggered && triggerCount >= count) {
+		    triggered = true;
+		    triggerTime = sim.t;
+		}
+	    }
+	    if (conditionActive && !condition)
+		conditionActive = false;
 	    if (triggered && sim.t >= triggerTime+delay) {
 		triggered = false;
+		triggerCount = 0;
 		stopped = true;
-		sim.setSimRunning(false);
+		app.setSimRunning(false);
 	    }
 	}
 	
@@ -84,11 +124,13 @@ class StopTriggerElm extends CircuitElm {
 	    arr[1] = "V = " + getVoltageText(volts[0]);
 	    arr[2] = "Vtrigger = " + getVoltageText(triggerVoltage);
 	    arr[3] = (triggered) ? ("stopping in " + getUnitText(triggerTime+delay-sim.t, "s")) : (stopped) ? "stopped" : "waiting";
+	    if (!stopped && count > 1)
+		arr[3] += " (" + Math.min(triggerCount, count) + "/" + count + ")";
 	}
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0) {
 		EditInfo ei = new EditInfo("Voltage", triggerVoltage);
-		return ei;
+		return ei.setUnitStep();
 	    }
 	    if (n == 1) {
 		EditInfo ei =  new EditInfo("Trigger Type", type, -1, -1);
@@ -102,6 +144,14 @@ class StopTriggerElm extends CircuitElm {
 		EditInfo ei = new EditInfo("Delay (s)", delay);
 		return ei;
 	    }
+	    if (n == 3) {
+		EditInfo ei = new EditInfo("Required Duration (s)", requiredDuration);
+		return ei;
+	    }
+	    if (n == 4) {
+		EditInfo ei = new EditInfo("Required Count", count, -1, -1);
+		return ei.setDimensionless().setPositive();
+	    }
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
@@ -111,5 +161,15 @@ class StopTriggerElm extends CircuitElm {
 		type = ei.choice.getSelectedIndex();
 	    if (n == 2)
 		delay = ei.value;
+	    if (n == 3) {
+		requiredDuration = ei.value;
+		if (requiredDuration < 0)
+		    requiredDuration = 0;
+	    }
+	    if (n == 4) {
+		count = (int) ei.value;
+		if (count < 1)
+		    count = 1;
+	    }
 	}
     }

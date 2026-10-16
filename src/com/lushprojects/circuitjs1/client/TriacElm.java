@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 // 3 nodes, 2 internal nodes
 // 1 = MT1, 0 = MT2, 2 = gate
 // 3 = internal node between MT1 and MT2 (mtinode)
@@ -76,8 +79,22 @@ class TriacElm extends CircuitElm {
     }
     
     int getDumpType() { return 206; }
-    String dump() {
-	return super.dump() + " " + triggerI + " " + holdingI + " " + cresistance + " " + state;
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "ti", triggerI);
+	XMLSerializer.dumpAttr(elem, "hi", holdingI);
+	XMLSerializer.dumpAttr(elem, "cr", cresistance);
+    }
+    void dumpXmlState(Document doc, Element elem) {
+	XMLSerializer.dumpAttr(elem, "st", state);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	triggerI = xml.parseDoubleAttr("ti", triggerI);
+	holdingI = xml.parseDoubleAttr("hi", holdingI);
+	cresistance = xml.parseDoubleAttr("cr", cresistance);
+	state = xml.parseBooleanAttr("st", state);
+	setup();
     }
     double i1, i2, ig, curcount_1, curcount_2, curcount_g;
     double cresistance, triggerI, holdingI;
@@ -123,15 +140,15 @@ class TriacElm extends CircuitElm {
 	    arrows[i] = createPolygon(p1, p2, p3);
 	}
 	
-	int gatelen = sim.gridSize;
+	int gatelen = app.gridSize;
         double leadlen = (dn-16)/2;
-	gatelen += leadlen % sim.gridSize;
+	gatelen += leadlen % app.gridSize;
 	if (leadlen < gatelen) {
 	    x2 = x; y2 = y;
 	    return;
 	}
 	interpPoint(lead2, point2, gate[0], gatelen/leadlen, gatelen*dir);
-	interpPoint(lead2, point2, gate[1], gatelen/leadlen, sim.gridSize*2*dir);
+	interpPoint(lead2, point2, gate[1], gatelen/leadlen, app.gridSize*2*dir);
 	
     }
     
@@ -160,14 +177,14 @@ class TriacElm extends CircuitElm {
 	curcount_1 = updateDotCount(i1, curcount_1);
 	curcount_2 = updateDotCount(i2, curcount_2);
 	curcount_g = updateDotCount(ig, curcount_g);
-	if (sim.dragElm != this) {
+	if (!isCreating()) {
 	    drawDots(g, point1, lead2, curcount_2);
 	    drawDots(g, point2, lead2, curcount_1);
 	    drawDots(g, gate[1], gate[0], curcount_g);
 	    drawDots(g, gate[0], lead2, curcount_g+distance(gate[1], gate[0]));
 	}
 	
-	if ((needsHighlight() || sim.dragElm == this) && point1.x == point2.x && point2.y > point1.y) {
+	if ((needsHighlight() || isCreating()) && point1.x == point2.x && point2.y > point1.y) {
 	    g.setColor(whiteColor);
 	    int ds = sign(dx);
 	    g.drawString("MT1", lead2.x+((ds < 0) ? 5 : -30), lead2.y+12);
@@ -241,19 +258,19 @@ class TriacElm extends CircuitElm {
     }
     public EditInfo getEditInfo(int n) {
 	if (n == 0)
-	    return new EditInfo("Trigger Current (A)", triggerI, 0, 0);
+	    return new EditInfo("Trigger Current (A)", triggerI, 0, 0).setPositive();
 	if (n == 1)
-	    return new EditInfo("Holding Current (A)", holdingI, 0, 0);
+	    return new EditInfo("Holding Current (A)", holdingI, 0, 0).setPositive();
         if (n == 2)
-            return new EditInfo("Gate-MT1 Resistance (ohms)", cresistance, 0, 0);
+            return new EditInfo("Gate-MT1 Resistance (ohms)", cresistance, 0, 0).setPositive();
 	return null;
     }
     public void setEditValue(int n, EditInfo ei) {
-	if (n == 0 && ei.value > 0)
+	if (n == 0)
 	    triggerI = ei.value;
-	if (n == 1 && ei.value > 0)
+	if (n == 1)
 	    holdingI = ei.value;
-        if (n == 2 && ei.value > 0)
+        if (n == 2)
             cresistance = ei.value;
     }
     boolean canViewInScope() { return true; }

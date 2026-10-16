@@ -19,13 +19,21 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    abstract class GateElm extends CircuitElm {
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+abstract class GateElm extends CircuitElm {
 	final int FLAG_SMALL = 1<<0;
 	final int FLAG_SCHMITT = 1<<1;
 	final int FLAG_INVERT_INPUTS = 1<<2;
+	final int FLAG_DEMORGAN = 1<<3;
+
 	int inputCount = 2;
 	boolean lastOutput;
+	int getDragLength() { return 96; }
 	double highVoltage;
+	double propagationDelay; // seconds; 0 = instant (default)
+	double delayEndTime;     // time at which pending output change takes effect
 	public static double lastHighVoltage = 5;
 	static boolean lastSchmitt = false;
 	
@@ -33,13 +41,15 @@ package com.lushprojects.circuitjs1.client;
 	    super(xx, yy);
 	    noDiagonal = true;
 	    inputCount = 2;
-	    
+	    allocNodes();
+	    setupVolts();
+
 	    // copy defaults from last gate edited
 	    highVoltage = lastHighVoltage;
 	    if (lastSchmitt)
 		flags |= FLAG_SCHMITT;
-	    
-	    setSize(sim.smallGridCheckItem.getState() ? 1 : 2);
+
+	    setSize(useSmallGrid() ? 1 : 2);
 	}
 	public GateElm(int xa, int ya, int xb, int yb, int f,
 			StringTokenizer st) {
@@ -66,16 +76,65 @@ package com.lushprojects.circuitjs1.client;
 	    flags &= ~FLAG_SMALL;
 	    flags |= (s == 1) ? FLAG_SMALL : 0;
 	}
-	String dump() {
-	    return super.dump() + " " + inputCount + " " + volts[inputCount] + " " + highVoltage;
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    if (highVoltage != 5)
+		XMLSerializer.dumpAttr(elem, "hi", highVoltage);
+	    if (inputCount != 2)
+		XMLSerializer.dumpAttr(elem, "in", inputCount);
+	    if (propagationDelay != 0)
+		XMLSerializer.dumpAttr(elem, "pd", propagationDelay);
 	}
+
+	void dumpXmlState(Document doc, Element elem) {
+	    if (volts[inputCount] != 0)
+		XMLSerializer.dumpAttr(elem, "o", volts[inputCount]);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    // "ix" is present on state-restore calls (from CompositeElm.dumpXmlState/undumpXml).
+	    // In that case this element already exists with correct flags (set up when the
+	    // containing model was loaded), and the state element has no "f" attribute, so
+	    // zeroing flags here would wipe FLAG_SCHMITT/FLAG_INVERT_INPUTS/FLAG_SMALL instead
+	    // of restoring them.
+	    boolean stateRestore = xml.parseStringAttr("ix", null) != null;
+	    if (!stateRestore)
+		flags = 0; // SMALL might have gotten set
+	    super.undumpXml(xml);
+	    highVoltage = xml.parseDoubleAttr("hi", highVoltage);
+	    inputCount = xml.parseIntAttr("in", inputCount);
+	    propagationDelay = xml.parseDoubleAttr("pd", propagationDelay);
+	    double lastOutputVoltage = xml.parseDoubleAttr("o", 0);
+	    lastOutput = lastOutputVoltage > highVoltage*.5;
+	    setSize((flags & FLAG_SMALL) != 0 ? 1 : 2);
+	    allocNodes();
+	    setupVolts();
+	}
+
+	void addRoutingObstacle(WireRouter router) {
+	    // add wires from each input post to gate body
+	    for (int i = 0; i < inputCount; i++)
+		router.addWire(inPosts[i].x, inPosts[i].y, inGates[i].x, inGates[i].y);
+	    // add output wire
+	    router.addWire(lead2.x, lead2.y, point2.x, point2.y);
+
+	    double leadDist = distance(lead1, lead2);
+	    double hs2 = gwidth*(inputCount/2+1);
+            Point pa = interpPoint(lead1, lead2, -8/leadDist, hs2);
+            Point pb = interpPoint(lead1, lead2, 1, -hs2);
+            router.addObstacle(pa.x, pa.y, pb.x, pb.y);
+        }
+
+	String getXmlDumpType() { return getClassName().replace("GateElm", ""); }
+
 	Point inPosts[], inGates[];
 	boolean inputStates[];
 	int ww;
 	void setPoints() {
 	    super.setPoints();
 	    inputStates = new boolean[inputCount];
-	    if (dn > 150 && this == sim.dragElm)
+	    if (dn > 150 && isCreating())
 		setSize(2);
 	    int hs = gheight;
 	    int i;
@@ -88,7 +147,7 @@ package com.lushprojects.circuitjs1.client;
 	    inPosts = new Point[inputCount];
 	    inGates = new Point[inputCount];
 	    int i0 = -inputCount/2;
-	    if (hasFlag(FLAG_INVERT_INPUTS))
+	    if (hasFlag(FLAG_INVERT_INPUTS) || hasFlag(FLAG_DEMORGAN))
 		icircles = new Point[inputCount];
 	    else
 		icircles = null;
@@ -105,6 +164,39 @@ package com.lushprojects.circuitjs1.client;
 	    setBbox(point1, point2, hs2);
 	    if (hasSchmittInputs())
 		schmittPoly = getSchmittPolygon(gsize, .47f);
+
+	    if (useEuroGates()) {
+		createEuroGatePolygon();
+		linePoints = null;
+	    } else {
+		// 0 - top left, 1 - start of top curve, 2 - control point for top curve
+		// 3 - right, 4 - control point for bottom curve, 5 - start of bottom curve, 6 - bottom right, 7 - control point for left curve
+		Point triPoints[] = newPointArray(11);
+
+		if (drawAsAndGate()) {
+		    interpPoint2(lead1, lead2, triPoints[0], triPoints[6], 0, hs2);
+		    interpPoint2(lead1, lead2, triPoints[1], triPoints[5], .5, hs2);
+		    interpPoint2(lead1, lead2, triPoints[2], triPoints[4], 1, hs2);
+		    interpPoint(lead1, lead2, triPoints[3], 1);
+		} else {
+		    interpPoint2(lead1, lead2, triPoints[0], triPoints[6], 0, hs2);
+		    interpPoint2(lead1, lead2, triPoints[1], triPoints[5], .3, hs2);
+		    triPoints[3] = lead2;
+		    interpPoint2(lead1, lead2, triPoints[2], triPoints[4], .733, hs2*.85);
+		    interpPoint(lead1, lead2, triPoints[7], .105); // was .15
+		}
+		if (this instanceof XorGateElm || this instanceof XnorGateElm) {
+		    double ww2 = (ww == 0) ? dn*2 : ww*2;
+		    interpPoint2(lead1, lead2, triPoints[8], triPoints[9], -.05-8/ww2, hs2);
+		    interpPoint(lead1, lead2, triPoints[10], .1-8/ww2);
+		}
+		gatePoly = createPolygon(triPoints);
+	    }
+
+	    if (isInverting() ^ hasFlag(FLAG_DEMORGAN)) {
+		pcircle = interpPoint(point1, point2, .5+(ww+4)/dn);
+		lead2 = interpPoint(point1, point2, .5+(ww+8)/dn);
+	    }
 	}
 	
 	// Restore state if loading from file or volts is reallocated.
@@ -126,12 +218,54 @@ package com.lushprojects.circuitjs1.client;
 	}
 
 	String getGateText() { return null; }
-	static boolean useEuroGates() { return sim.euroGatesCheckItem.getState(); }
+	static boolean useEuroGates() { return app.menus.euroGatesCheckItem.getState(); }
 
 	void drawGatePolygon(Graphics g) {
-	    drawThickPolygon(g, gatePoly);
+	    g.setLineWidth(3.0);
+	    g.context.beginPath();
+	    if (drawAsAndGate()) {
+		g.context.moveTo(gatePoly.xpoints[0], gatePoly.ypoints[0]);
+		g.context.lineTo(gatePoly.xpoints[1], gatePoly.ypoints[1]);
+		g.context.bezierCurveTo(
+		    gatePoly.xpoints[1], gatePoly.ypoints[1],
+		    gatePoly.xpoints[2], gatePoly.ypoints[2],
+		    gatePoly.xpoints[3], gatePoly.ypoints[3]);
+		g.context.bezierCurveTo(
+		    gatePoly.xpoints[3], gatePoly.ypoints[3],
+		    gatePoly.xpoints[4], gatePoly.ypoints[4],
+		    gatePoly.xpoints[5], gatePoly.ypoints[5]);
+		g.context.lineTo(gatePoly.xpoints[6], gatePoly.ypoints[6]);
+	    } else {
+		g.context.moveTo(gatePoly.xpoints[0], gatePoly.ypoints[0]);
+		g.context.lineTo(gatePoly.xpoints[1], gatePoly.ypoints[1]);
+		g.context.bezierCurveTo(
+		    gatePoly.xpoints[2], gatePoly.ypoints[2],
+		    gatePoly.xpoints[2], gatePoly.ypoints[2],
+		    gatePoly.xpoints[3], gatePoly.ypoints[3]);
+		g.context.bezierCurveTo(
+		    gatePoly.xpoints[4], gatePoly.ypoints[4],
+		    gatePoly.xpoints[4], gatePoly.ypoints[4],
+		    gatePoly.xpoints[5], gatePoly.ypoints[5]);
+		g.context.lineTo(gatePoly.xpoints[6], gatePoly.ypoints[6]);
+		g.context.bezierCurveTo(
+		    gatePoly.xpoints[7], gatePoly.ypoints[7],
+		    gatePoly.xpoints[7], gatePoly.ypoints[7],
+		    gatePoly.xpoints[0], gatePoly.ypoints[0]);
+	    }
+	    g.context.closePath();
+
+	    if (this instanceof XorGateElm || this instanceof XnorGateElm) {
+		g.context.moveTo(gatePoly.xpoints[8], gatePoly.ypoints[8]);
+		g.context.bezierCurveTo(
+		    gatePoly.xpoints[10], gatePoly.ypoints[10],
+		    gatePoly.xpoints[10], gatePoly.ypoints[10],
+		    gatePoly.xpoints[9], gatePoly.ypoints[9]);
+	    }
+
+	    g.context.stroke();
+	    g.setLineWidth(1.0);
 	}
-	
+
 	void draw(Graphics g) {
 	    int i;
 	    for (i = 0; i != inputCount; i++) {
@@ -154,7 +288,7 @@ package com.lushprojects.circuitjs1.client;
 	    if (linePoints != null)
 		for (i = 0; i != linePoints.length-1; i++)
 		    drawThickLine(g, linePoints[i], linePoints[i+1]);
-	    if (isInverting())
+	    if (pcircle != null && (isInverting() ^ hasFlag(FLAG_DEMORGAN)))
 		drawThickCircle(g, pcircle.x, pcircle.y, 3);
 	    if (icircles != null)
 		for (i = 0; i != inputCount; i++)
@@ -173,19 +307,28 @@ package com.lushprojects.circuitjs1.client;
 	}
 	int getVoltageSourceCount() { return 1; }
 	abstract String getGateName();
+	abstract boolean drawAsAndGate();
 	void getInfo(String arr[]) {
 	    arr[0] = getGateName();
 	    arr[1] = "Vout = " + getVoltageText(volts[inputCount]);
 	    arr[2] = "Iout = " + getCurrentText(getCurrent());
+	    if (propagationDelay > 0)
+		arr[3] = "delay = " + getUnitText(propagationDelay, "s");
 	}
+	void setHighVoltage(double hv) { highVoltage = hv; }
+
 	void stamp() {
-	    sim.stampVoltageSource(0, nodes[inputCount], voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[inputCount], voltSource);
 	}
 	boolean hasSchmittInputs() { return (flags & FLAG_SCHMITT) != 0; }
 	boolean getInput(int x) {
 	    boolean high = !hasFlag(FLAG_INVERT_INPUTS);
 	    if (!hasSchmittInputs())
 		return (volts[x] > highVoltage*.5) ? high : !high;
+	    // inputStates is normally allocated in setPoints(), but elements inside a
+	    // CompositeElm/subcircuit never get setPoints() called, so allocate lazily here too.
+	    if (inputStates == null || inputStates.length != inputCount)
+		inputStates = new boolean[inputCount];
 	    boolean res = volts[x] > highVoltage*(inputStates[x] ? .35 : .55);
 	    inputStates[x] = res;
 	    return res ? high : !high;
@@ -199,45 +342,71 @@ package com.lushprojects.circuitjs1.client;
 	    boolean f = calcFunction();
 	    if (isInverting())
 		f = !f;
-	    
-	    if (lastTime != sim.t) {
+
+	    if (propagationDelay == 0 && lastTime != sim.t) {
 		// detect oscillation (using same strategy as Atanua)
 		if (lastOutput == !f) {
 		    if (oscillationCount++ > 50) {
 			// output is oscillating too much, randomly leave output the same
 			oscillationCount = 0;
-			if (sim.getrand(10) > 5)
+			if (app.getrand(10) > 5)
 			    f = lastOutput;
 		    }
 		} else
 		    oscillationCount = 0;
-	    
-		lastOutput = f;
+
 		lastTime = sim.t;
 	    }
-	    
-	    double res = f ? highVoltage : 0;
-	    sim.updateVoltageSource(0, nodes[inputCount], voltSource, res);
+
+	    // apply propagation delay if configured
+	    if (propagationDelay > 0) {
+		if (f != lastOutput) {
+		    // desired output differs from current output
+		    if (delayEndTime == 0)
+			// start the delay timer on first detection of change
+			delayEndTime = sim.t + propagationDelay;
+		    else if (sim.t >= delayEndTime) {
+			// delay has elapsed, apply the change
+			lastOutput = f;
+			delayEndTime = 0;
+		    }
+		} else {
+		    // output matches desired; cancel any pending delay
+		    delayEndTime = 0;
+		}
+	    } else {
+		lastOutput = f;
+	    }
+
+	    double res = lastOutput ? highVoltage : 0;
+	    sim.updateVoltageSource(CircuitNode.ground, nodes[inputCount], voltSource, res);
 	}
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
 		return new EditInfo("# of Inputs", inputCount, 1, 8).
 		    setDimensionless();
 	    if (n == 1)
-		return new EditInfo("High Logic Voltage", highVoltage, 1, 10);
+		return new EditInfo("High Logic Voltage", highVoltage, 1, 10).setUnitStep();
 	    if (n == 2)
 		return EditInfo.createCheckbox("Schmitt Inputs", hasSchmittInputs());
 	    if (n == 3)
 		return EditInfo.createCheckbox("Invert Inputs", hasFlag(FLAG_INVERT_INPUTS));
+	    if (n == 4)
+		return new EditInfo("Propagation Delay (s)", propagationDelay, 0, 0);
+	    if (n == 5)
+		return EditInfo.createCheckbox("DeMorgan's Symbol", hasFlag(FLAG_DEMORGAN));
 	    return null;
 	}
 
 	public void setEditValue(int n, EditInfo ei) {
-	    if (n == 0 && ei.value >= 1) {
-		inputCount = (int) ei.value;
-		allocNodes();
-		setupVolts();
-		setPoints();
+	    if (n == 0) {
+		if (ei.value >= 1) {
+		    inputCount = (int) ei.value;
+		    allocNodes();
+		    setupVolts();
+		    setPoints();
+		} else
+		    ei.setError("must be >= 1");
 	    }
 	    if (n == 1)
 		highVoltage = lastHighVoltage = ei.value;
@@ -250,12 +419,32 @@ package com.lushprojects.circuitjs1.client;
 		setPoints();
 	    }
 	    if (n == 3) {
-		flags = ei.changeFlag(flags, FLAG_INVERT_INPUTS);
+		// Invert Inputs (3) and DeMorgan's Symbol (5) are mutually exclusive
+		if (ei.checkbox.getState()) {
+		    flags |= FLAG_INVERT_INPUTS;
+		    flags &= ~FLAG_DEMORGAN;
+		} else
+		    flags &= ~FLAG_INVERT_INPUTS;
 		setPoints();
+		if (CirSim.editDialog != null)
+		    CirSim.editDialog.resetDialog();
+	    }
+	    if (n == 4)
+		propagationDelay = ei.value;
+	    if (n == 5) {
+		if (ei.checkbox.getState()) {
+		    flags |= FLAG_DEMORGAN;
+		    flags &= ~FLAG_INVERT_INPUTS;
+		} else
+		    flags &= ~FLAG_DEMORGAN;
+		setPoints();
+		if (CirSim.editDialog != null)
+		    CirSim.editDialog.resetDialog();
 	    }
 	}
 	// there is no current path through the gate inputs, but there
 	// is an indirect path through the output to ground.
+	boolean validate() { return validateRailNode(inputCount); }
 	boolean getConnection(int n1, int n2) { return false; }
 	boolean hasGroundConnection(int n1) {
 	    return (n1 == inputCount);

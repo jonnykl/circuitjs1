@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.google.gwt.user.client.ui.Label;
 import com.lushprojects.circuitjs1.client.util.Locale;
 import com.google.gwt.user.client.Command;
@@ -36,6 +39,9 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	Scrollbar slider;
 	Label label;
 	String sliderText;
+	int link;
+	boolean sliderOwner;
+	boolean deleted;
 	public PotElm(int xx, int yy) {
 		super(xx, yy);
 		setup();
@@ -62,31 +68,112 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
     
     int getPostCount() { return 3; }
     int getDumpType() { return 174; }
+    String getXmlDumpType() { return "pt"; }
     
     Point getPost(int n) {
 	return (n == 0) ? point1 : (n == 1) ? point2 : post3;
     }
     
-    String dump() { return super.dump() + " " + maxResistance + " " +
-    		position + " " + sliderText; }
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "ma", maxResistance);
+        XMLSerializer.dumpAttr(elem, "po", position);
+        XMLSerializer.dumpAttr(elem, "sl", sliderText);
+        if (link != 0)
+            XMLSerializer.dumpAttr(elem, "li", link);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+        super.undumpXml(xml);
+        maxResistance = xml.parseDoubleAttr("ma", maxResistance);
+        position = xml.parseDoubleAttr("po", position);
+        sliderText = xml.parseStringAttr("sl", sliderText);
+        setLink(xml.parseIntAttr("li", 0));
+	int value = calcSliderValue();
+	slider.setValue(value);
+	label.setText(sliderText);
+    }
+
+    // detach from slider, transferring ownership to another linked pot if possible;
+    // if no transfer, removes the widgets from the panel
+    void detachSlider() {
+        if (!sliderOwner)
+            return;
+        boolean transferred = false;
+        if (link != 0) {
+            for (CircuitElm ce : app.elmList) {
+                if (ce instanceof PotElm && ce != this) {
+                    PotElm pe = (PotElm) ce;
+                    if (pe.link == link && !pe.deleted) {
+                        pe.sliderOwner = true;
+                        slider.command = pe;
+                        slider.attachedElm = pe;
+                        transferred = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!transferred) {
+            app.removeWidgetFromVerticalPanel(label);
+            app.removeWidgetFromVerticalPanel(slider);
+        }
+        slider = null;
+        label = null;
+        sliderOwner = false;
+    }
+
+    void setLink(int newLink) {
+        if (newLink == link)
+            return;
+        detachSlider();
+        link = newLink;
+        createSlider();
+    }
     
-    void createSlider() {
-    	sim.addWidgetToVerticalPanel(label = new Label(sliderText));
-    	label.addStyleName("topSpace");
+    int calcSliderValue() {
     	int value = (int) Math.round((position-.005)/.0099);
-    	sim.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101, this, this));
-   // 	sim.verticalPanel.validate();
-   // 	slider.addAdjustmentListener(this);
+	return value;
+    }
+
+    void createSlider() {
+        if (link != 0) {
+            for (CircuitElm ce : app.elmList) {
+                if (ce instanceof PotElm && ce != this) {
+                    PotElm pe = (PotElm) ce;
+                    if (pe.link == link && pe.slider != null) {
+                        slider = pe.slider;
+                        label = pe.label;
+                        sliderOwner = false;
+                        return;
+                    }
+                }
+            }
+        }
+    	app.addWidgetToVerticalPanel(label = new Label(sliderText));
+    	label.addStyleName("topSpace");
+	int value = calcSliderValue();
+    	app.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101, this, this));
+        sliderOwner = true;
     }
     
     public void execute() {
-	sim.analyzeFlag = true;
+	app.analyzeFlag = true;
 	setPoints();
+	if (link != 0) {
+	    for (CircuitElm ce : app.elmList) {
+		if (ce instanceof PotElm && ce != this) {
+		    PotElm pe = (PotElm) ce;
+		    if (pe.link == link)
+			pe.setPoints();
+		}
+	    }
+	}
     }
     
     void delete() {
-	sim.removeWidgetFromVerticalPanel(label);
-	sim.removeWidgetFromVerticalPanel(slider);
+	deleted = true;
+	detachSlider();
         super.delete();
     }
     
@@ -99,12 +186,12 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	int offset = 0;
 	int myLen =0;
 	if (abs(dx) > abs(dy) != hasFlag(FLAG_FLIP)) {
-	    myLen =  2 * sim.gridSize * Integer.signum(dx) * ((((int)Math.abs(dx))+ 2 * sim.gridSize -1) / (2 * sim.gridSize));
+	    myLen =  2 * app.gridSize * Integer.signum(dx) * ((((int)Math.abs(dx))+ 2 * app.gridSize -1) / (2 * app.gridSize));
 	    point2.x =  point1.x + myLen;
 	    offset = (dx < 0) ? dy : -dy;
 	    point2.y = point1.y;
 	} else {
-	    myLen =  2 * sim.gridSize * Integer.signum(dy) * ((((int)Math.abs(dy))+ 2 * sim.gridSize -1) / (2 * sim.gridSize));
+	    myLen =  2 * app.gridSize * Integer.signum(dy) * ((((int)Math.abs(dy))+ 2 * app.gridSize -1) / (2 * app.gridSize));
 	    if (dy != 0) {
 		point2.y = point1.y + myLen;
 		offset = (dy > 0) ? dx : -dx;
@@ -112,7 +199,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	    }
 	}
 	if (offset == 0)
-	    offset = (hasFlag(FLAG_FLIP_OFFSET)) ? -sim.gridSize : sim.gridSize;
+	    offset = (hasFlag(FLAG_FLIP_OFFSET)) ? -app.gridSize : app.gridSize;
 	dn = distance(point1, point2);
 	int bodyLen = 32;
 	calcLeads(bodyLen);
@@ -136,7 +223,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	int segments = 16;
 	int i;
 	int ox = 0;
-	int hs = sim.euroResistorCheckItem.getState() ? 6 : 8;
+	int hs = showEuroResistors() ? 6 : 8;
 	double v1 = volts[0];
 	double v2 = volts[1];
 	double v3 = volts[2];
@@ -146,7 +233,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	setPowerColor(g, true);
 	double segf = 1./segments;
 	int divide = (int) (segments*position);
-	if (!sim.euroResistorCheckItem.getState()) {
+	if (!showEuroResistors()) {
 	    // draw zigzag
 	    for (i = 0; i != segments; i++) {
 		int nx = 0;
@@ -190,7 +277,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	curcount1 = updateDotCount(current1, curcount1);
 	curcount2 = updateDotCount(current2, curcount2);
 	curcount3 = updateDotCount(current3, curcount3);
-	if (sim.dragElm != this) {
+	if (!isCreating()) {
 	    drawDots(g, point1, midpoint, curcount1);
 	    drawDots(g, point2, midpoint, curcount2);
 	    drawDots(g, post3, corner2, curcount3);
@@ -198,7 +285,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	}
 	drawPosts(g);
 
-	if (sim.showValuesCheckItem.getState() && resistance1 > 0 && (flags & FLAG_SHOW_VALUES) != 0) {
+	if (showValues() && resistance1 > 0 && (flags & FLAG_SHOW_VALUES) != 0) {
 	    // check for vertical pot with 3rd terminal on left
 	    boolean reverseY = (post3.x < lead1.x && lead1.x == lead2.x);
 	    // check for horizontal pot with 3rd terminal on top
@@ -207,9 +294,12 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	    boolean rev = (lead1.x == lead2.x && lead1.y < lead2.y) || (lead1.y == lead2.y && lead1.x > lead2.x);
 	    
 	    // draw units
-	    String s1 = getShortUnitText(rev ? resistance2 : resistance1, "");
-	    String s2 = getShortUnitText(rev ? resistance1 : resistance2, "");
-	    g.setFont(unitsFont);
+		//	Add Omega symbol to resistors
+	    String s1 = getShortUnitText(rev ? resistance2 : resistance1, showOhmSymbol() ? Locale.ohmString : "");
+	    String s2 = getShortUnitText(rev ? resistance1 : resistance2, showOhmSymbol() ? Locale.ohmString : "");
+
+	    g.save();
+	    g.setFont(valueFont);
 	    g.setColor(whiteColor);
 	    int ya = (int)g.currentFontSize/2;
 	    int w;
@@ -226,6 +316,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 		g.drawString(s2, !reverseY ? arrowPoint.x+2 : arrowPoint.x-2-w, Math.min(arrow1.y, arrow2.y)-3);
 	    else
 		g.drawString(s2, Math.max(arrow1.x, arrow2.x)+2, !reverseX ? arrowPoint.y+4+ya : arrowPoint.y-4); 
+	    g.restore();
 	}
     }
     
@@ -233,7 +324,7 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
     void drawValues(Graphics g, String s, Point pt, int hs) {
 	if (s == null)
 	    return;
-	g.setFont(unitsFont);
+	g.setFont(valueFont);
 	//FontMetrics fm = g.getFontMetrics();
 	int w = (int)g.context.measureText(s).getWidth();
 	g.setColor(whiteColor);
@@ -302,6 +393,8 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
             ei.checkbox = new Checkbox("Show Values", (flags & FLAG_SHOW_VALUES) != 0);
             return ei;
 	}
+	if (n == 3)
+	    return new EditInfo("Group Number (for linking)", link, -1, -1);
 	return null;
     }
     public void setEditValue(int n, EditInfo ei) {
@@ -310,10 +403,14 @@ class PotElm extends CircuitElm implements Command, MouseWheelHandler {
 	if (n == 1) {
 	    sliderText = ei.textf.getText();
 	    label.setText(sliderText);
-	    sim.setiFrameHeight();
+	    app.setiFrameHeight();
 	}
 	if (n == 2)
 	    flags = ei.changeFlag(flags, FLAG_SHOW_VALUES);
+	if (n == 3) {
+	    setLink((int) ei.value);
+	    slider.setValue(calcSliderValue());
+	}
     }
     void setMouseElm(boolean v) {
     	super.setMouseElm(v);

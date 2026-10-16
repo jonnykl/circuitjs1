@@ -19,7 +19,10 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class LogicOutputElm extends CircuitElm {
+    import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class LogicOutputElm extends CircuitElm {
 	final int FLAG_TERNARY = 1;
 	final int FLAG_NUMERIC = 2;
 	final int FLAG_PULLDOWN = 4;
@@ -41,6 +44,18 @@ package com.lushprojects.circuitjs1.client;
 	String dump() {
 	    return super.dump() + " " + threshold;
 	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    if (threshold != 2.5)
+		XMLSerializer.dumpAttr(elem, "th", threshold);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    threshold = xml.parseDoubleAttr("th", threshold);
+	}
+
 	int getDumpType() { return 'M'; }
 	int getPostCount() { return 1; }
 	boolean isTernary() { return (flags & FLAG_TERNARY) != 0; }
@@ -77,7 +92,7 @@ package com.lushprojects.circuitjs1.client;
 	}
 	void stamp() {
 	    if (needsPullDown())
-		sim.stampResistor(nodes[0], 0, 1e6);
+		sim.stampResistor(nodes[0], CircuitNode.ground, 1e6);
 	}
 	double getVoltageDiff() { return volts[0]; }
 	void getInfo(String arr[]) {
@@ -129,6 +144,11 @@ package com.lushprojects.circuitjs1.client;
 		    flags &= ~FLAG_TERNARY;
 	    }
 	}
+	void addRoutingObstacle(WireRouter router) {
+	    router.addWire(point1.x, point1.y, lead1.x, lead1.y);
+	    router.addObstacle(x2 - 10, y2 - 10, x2 + 10, y2 + 10);
+	}
+
 	int getShortcut() { return 'o'; }
 	
 //    void drawHandles(Graphics g, Color c) {

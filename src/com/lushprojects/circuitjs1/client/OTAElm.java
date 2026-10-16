@@ -1,5 +1,8 @@
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 public class OTAElm extends CompositeElm {
 
     private static String modelString = "RailElm 4\rRailElm 10\rNTransistorElm 1 2 3\rNTransistorElm 3 1 4\rNTransistorElm 3 3 4\rNTransistorElm 5 6 2\rNTransistorElm 7 8 2\rPTransistorElm 9 6 10\rPTransistorElm 9 9 10\rPTransistorElm 6 12 9\rPTransistorElm 11 8 10\rPTransistorElm 11 11 10\rPTransistorElm 8 13 11\rNTransistorElm 14 14 4\rNTransistorElm 14 12 4\rNTransistorElm 12 13 14\rNTransistorElm 15 15 5\rNTransistorElm 15 15 7";
@@ -120,8 +123,8 @@ public class OTAElm extends CompositeElm {
 	in3p[1] = lead1;
 	in4p[0] = interpPoint(lead1, lead2, 1.0 - (16.0 / wtot), 32);
 	in4p[1] = interpPoint(lead1, lead2, 1.0 - (16.0 / wtot), 8);
-	// in4p[0].x=sim.snapGrid(in4p[0].x);
-	// in4p[0].y=sim.snapGrid(in4p[0].y);
+	// in4p[0].x=snapGrid(in4p[0].x);
+	// in4p[0].y=snapGrid(in4p[0].y);
 	Point tris[] = newPointArray(3);
 	interpPoint2(lead1, lead2, tris[0], tris[1], 0, 3 * hs / 2);
 	tris[2] = interpPoint(lead1, lead2, (2.0 * ww) / wtot);
@@ -145,6 +148,19 @@ public class OTAElm extends CompositeElm {
 	setPost(4, point2bis);
     }
 
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "pv", posVolt);
+	XMLSerializer.dumpAttr(elem, "nv", negVolt);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	posVolt = xml.parseDoubleAttr("pv", posVolt);
+	negVolt = xml.parseDoubleAttr("nv", negVolt);
+	initOTA();
+    }
+
     @Override
     public int getDumpType() {
 	return 402;
@@ -158,9 +174,9 @@ public class OTAElm extends CompositeElm {
 
     public EditInfo getEditInfo(int n) {
 	if (n == 0)
-	    return new EditInfo("Positive Supply Voltage (5-20V)", posVolt, 5, 20);
+	    return new EditInfo("Positive Supply Voltage (5-20V)", posVolt, 5, 20).setUnitStep();
 	if (n == 1)
-	    return new EditInfo("Negative Supply Voltage (V)", negVolt, -20, -5);
+	    return new EditInfo("Negative Supply Voltage (V)", negVolt, -20, -5).setUnitStep();
 	return null;
     }
 

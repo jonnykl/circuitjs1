@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 // much of this was adapted from Bill Collis's code in TestPointElm.java
@@ -40,7 +43,8 @@ class ProbeElm extends CircuitElm {
     final int TP_PER = 7;
     final int TP_PWI = 8;
     final int TP_DUT = 9; //mark to space ratio
-    
+    final int TP_AVG = 10;
+
     public ProbeElm(int xx, int yy) { super(xx, yy);
     	meter = TP_VOL;
     	
@@ -65,12 +69,47 @@ class ProbeElm extends CircuitElm {
     String dump() {
         return super.dump() + " " + meter + " " + scale + " " + resistance;
     }
+
+    void dumpXml(Document doc, Element elem) {
+        super.dumpXml(doc, elem);
+        XMLSerializer.dumpAttr(elem, "me", meter);
+        XMLSerializer.dumpAttr(elem, "sc", scale);
+        XMLSerializer.dumpAttr(elem, "re", resistance);
+    }
+
+    void undumpXml(XMLDeserializer xml) {
+	flags = 0;
+        super.undumpXml(xml);
+        meter = xml.parseIntAttr("me", meter);
+        scale = xml.parseIntAttr("sc", scale);
+        resistance = xml.parseDoubleAttr("re", 0);
+    }
+
+    void reset() {
+        super.reset();
+        zerocount = 0;
+        rmsV = total = count = 0;
+        avgV = totalV = 0;
+        maxV = lastMaxV = 0;
+        minV = lastMinV = 0;
+        binaryLevel = 0;
+        period = pulseWidth = dutyCycle = 0;
+        selectedValue = 0;
+        periodStart = periodLength = pulseStart = 0;
+        increasingV = true;
+        decreasingV = true;
+        started = false;
+        lastStepCount = 0;
+    }
+
     String getMeter(){
         switch (meter) {
         case TP_VOL:
             return "V";
         case TP_RMS:
             return "V(rms)";
+        case TP_AVG:
+            return "V(avg)";
         case TP_MAX:
             return "Vmax";
         case TP_MIN:
@@ -90,8 +129,9 @@ class ProbeElm extends CircuitElm {
         }
         return "";
     }
-    
+
     double rmsV=0, total, count;
+    double avgV=0, totalV;
     double binaryLevel=0;//0 or 1 - double because we only pass doubles back to the web page
     int zerocount=0;
     double maxV=0, lastMaxV;
@@ -103,7 +143,9 @@ class ProbeElm extends CircuitElm {
     double selectedValue=0;
 
     boolean increasingV=true, decreasingV=true;
-    long periodStart, periodLength, pulseStart;//time between consecutive max values
+    boolean started=false;
+    int lastStepCount;
+    double periodStart, periodLength, pulseStart;//simulated time between consecutive max values
 
     Point center;
 	
@@ -116,11 +158,13 @@ class ProbeElm extends CircuitElm {
 
     void draw(Graphics g) {
 	g.save();
-	int hs = (drawAsCircle()) ? circleSize : 8;
+	String role = app.mouse.scopePlotRoles.get(this);
+	boolean showCircle = drawAsCircle() && (role == null || role.isEmpty());
+	int hs = showCircle ? circleSize : 8;
 	setBbox(point1, point2, hs);
 	boolean selected = needsHighlight();
-	double len = (selected || sim.dragElm == this || mustShowVoltage()) ? 16 : dn-32;
-	if (drawAsCircle())
+	double len = (selected || isCreating() || mustShowVoltage()) ? 16 : dn-32;
+	if (showCircle)
 	    len = circleSize*2;
 	calcLeads((int) len);
 	setVoltageColor(g, volts[0]);
@@ -133,10 +177,8 @@ class ProbeElm extends CircuitElm {
 	drawThickLine(g, lead2, point2);
 	Font f = new Font("SansSerif", Font.BOLD, 14);
 	g.setFont(f);
-	if (this == sim.plotXElm)
-	    drawCenteredText(g, "X", center.x, center.y, true);
-	if (this == sim.plotYElm)
-	    drawCenteredText(g, "Y", center.x, center.y, true);
+	if (role != null && !role.isEmpty())
+	    drawCenteredText(g, role, center.x, center.y, true);
 	if (mustShowVoltage()) {
 	    String s = "";
 	        switch (meter) {
@@ -145,6 +187,9 @@ class ProbeElm extends CircuitElm {
 	                break;
 	            case TP_RMS:
 	                s = getUnitTextWithScale(rmsV,"V(rms)", scale);
+	                break;
+	            case TP_AVG:
+	                s = getUnitTextWithScale(avgV,"V(avg)", scale);
 	                break;
 	            case TP_MAX:
 	                s = getUnitTextWithScale(lastMaxV,"Vpk", scale);
@@ -165,13 +210,13 @@ class ProbeElm extends CircuitElm {
 //	                s = "percent:"+period + " " + sim.timeStep + " " + sim.simTime + " " + sim.getIterCount();
 	                break;
 	            case TP_PWI:
-	                s = getUnitText(pulseWidth, "S");
+	                s = getUnitText(pulseWidth, "s");
 	                break;
 	            case TP_DUT:
 	                s = showFormat.format(dutyCycle);
 	                break;
 	        }
-	    drawValues(g, s, drawAsCircle() ? circleSize+3 : 4);
+	    drawValues(g, s, showCircle ? circleSize+3 : 4);
 	}
 	   g.setColor(whiteColor);
            g.setFont(unitsFont);
@@ -182,7 +227,7 @@ class ProbeElm extends CircuitElm {
 		plusPoint.y += 3;
            int w = (int)g.context.measureText("+").getWidth();
            g.drawString("+", plusPoint.x-w/2, plusPoint.y);
-           if (drawAsCircle()) {
+           if (showCircle) {
                g.setColor(lightGrayColor);
                drawThickCircle(g, center.x, center.y, circleSize);
                drawCenteredText(g, "V", center.x, center.y, true);
@@ -199,17 +244,31 @@ class ProbeElm extends CircuitElm {
     boolean drawAsCircle() { return (flags & FLAG_CIRCLE) != 0; }
     
     void stepFinished(){
+	if (sim.timeStepCount == lastStepCount)
+	    return;
+	lastStepCount = sim.timeStepCount;
         count++;//how many counts are in a cycle
         double v = getVoltageDiff();
         total += v*v; //sum of squares
+        totalV += v;
 
+        // binary threshold is a fixed 2.5V (assumes ~5V logic levels); not scaled to the circuit's actual voltage range
         if (v<2.5)
             binaryLevel = 0;
         else
             binaryLevel = 1;
-        
-        
-        //V going up, track maximum value with 
+
+        if (!started) {
+            // prime max/min tracking with the first sample instead of the stale defaults (0, increasingV==decreasingV==true),
+            // which could otherwise register a bogus transition on the first step
+            started = true;
+            maxV = minV = v;
+            increasingV = true;
+            decreasingV = false;
+            periodStart = pulseStart = sim.t;
+        }
+
+        //V going up, track maximum value with
         if (v>maxV && increasingV){
             maxV = v;
             increasingV = true;
@@ -218,10 +277,10 @@ class ProbeElm extends CircuitElm {
         if (v<maxV && increasingV){//change of direction V now going down - at start of waveform
             lastMaxV=maxV; //capture last maximum 
             //capture time between
-            periodLength = System.currentTimeMillis() - periodStart;
-            periodStart = System.currentTimeMillis();
+            periodLength = sim.t - periodStart;
+            periodStart = sim.t;
             period = periodLength;
-            pulseWidth = System.currentTimeMillis() - pulseStart;
+            pulseWidth = sim.t - pulseStart;
             dutyCycle = pulseWidth / periodLength;
             minV=v; //track minimum value with V
             increasingV=false;
@@ -232,9 +291,13 @@ class ProbeElm extends CircuitElm {
             rmsV = Math.sqrt(total);
             if (Double.isNaN(rmsV))
                 rmsV=0;
+            avgV = totalV/count;
+            if (Double.isNaN(avgV))
+                avgV=0;
             count=0;
             total=0;
-            
+            totalV=0;
+
         }
         if (v<minV && decreasingV){ //V going down, track minimum value with V
             minV=v;
@@ -244,7 +307,7 @@ class ProbeElm extends CircuitElm {
 
         if (v>minV && decreasingV){ //change of direction V now going up
             lastMinV=minV; //capture last minimum
-            pulseStart =  System.currentTimeMillis();
+            pulseStart =  sim.t;
             maxV = v;
             increasingV = true;
             decreasingV = false;
@@ -254,10 +317,13 @@ class ProbeElm extends CircuitElm {
             rmsV = Math.sqrt(total);
             if (Double.isNaN(rmsV))
                 rmsV=0;
+            avgV = totalV/count;
+            if (Double.isNaN(avgV))
+                avgV=0;
             count=0;
             total=0;
+            totalV=0;
 
-            
         }
         //need to zero the rms value if it stays at 0 for a while
         if (v==0){
@@ -265,6 +331,7 @@ class ProbeElm extends CircuitElm {
             if (zerocount > 5){
                 total=0;
                 rmsV=0;
+                avgV=0;
                 maxV=0;
                 minV=0;
             }
@@ -284,7 +351,48 @@ class ProbeElm extends CircuitElm {
 
     void getInfo(String arr[]) {
 	arr[0] = "voltmeter";
-	arr[1] = "Vd = " + getVoltageText(getVoltageDiff());
+        int i = 1;
+        arr[i++] = getMeterLine(meter);
+        // show the rest of the already-tracked values too, skipping whichever one is selected above.
+        // frequency is left out here because it isn't actually computed anywhere (see getMeterLine);
+        // binary value is left out to make room for average, since arr[] only has room for 10 entries total
+        if (meter != TP_VOL) arr[i++] = getMeterLine(TP_VOL);
+        if (meter != TP_MAX) arr[i++] = getMeterLine(TP_MAX);
+        if (meter != TP_MIN) arr[i++] = getMeterLine(TP_MIN);
+        if (meter != TP_RMS) arr[i++] = getMeterLine(TP_RMS);
+        if (meter != TP_AVG) arr[i++] = getMeterLine(TP_AVG);
+        if (meter != TP_P2P) arr[i++] = getMeterLine(TP_P2P);
+        if (meter != TP_PER) arr[i++] = getMeterLine(TP_PER);
+        if (meter != TP_PWI) arr[i++] = getMeterLine(TP_PWI);
+        if (meter != TP_DUT) arr[i++] = getMeterLine(TP_DUT);
+    }
+
+    String getMeterLine(int m) {
+        switch (m) {
+            case TP_VOL:
+                return "Vd = " + getVoltageText(getVoltageDiff());
+            case TP_RMS:
+                return "V(rms) = " + getVoltageText(rmsV);
+            case TP_AVG:
+                return "V(avg) = " + getVoltageText(avgV);
+            case TP_MAX:
+                return "Vmax = " + getVoltageText(lastMaxV);
+            case TP_MIN:
+                return "Vmin = " + getVoltageText(lastMinV);
+            case TP_P2P:
+                return "Vp2p = " + getVoltageText(lastMaxV-lastMinV);
+            case TP_BIN:
+                return "Binary = " + binaryLevel;
+            case TP_FRQ:
+                return "Freq = " + getUnitText(frequency, "Hz");
+            case TP_PER:
+                return "Period = " + getUnitText(period, "s");
+            case TP_PWI:
+                return "Pulse width = " + getUnitText(pulseWidth, "s");
+            case TP_DUT:
+                return "Duty cycle = " + showFormat.format(dutyCycle);
+        }
+        return "";
     }
     boolean getConnection(int n1, int n2) { return (resistance != 0); }
 
@@ -299,15 +407,18 @@ class ProbeElm extends CircuitElm {
             ei.choice = new Choice();
             ei.choice.add("Voltage");
             ei.choice.add("RMS Voltage");
+            ei.choice.add("Average Voltage");
             ei.choice.add("Max Voltage");
             ei.choice.add("Min Voltage");
             ei.choice.add("P2P Voltage");
-            ei.choice.add("Binary Value");        
+            ei.choice.add("Binary Value");
             //ei.choice.add("Frequency");
             //ei.choice.add("Period");
             //ei.choice.add("Pulse Width");
             //ei.choice.add("Duty Cycle");
-            ei.choice.select(meter);
+            // TP_AVG's value isn't contiguous with the other meter constants shown here (it was
+            // appended after TP_DUT to avoid renumbering saved circuits), so map it explicitly.
+            ei.choice.select(meterChoiceIndex(meter));
             return ei;
         }
         if (n == 2) {
@@ -330,6 +441,17 @@ class ProbeElm extends CircuitElm {
         return null;
     }
 
+    int[] meterChoices() {
+	return new int[] { TP_VOL, TP_RMS, TP_AVG, TP_MAX, TP_MIN, TP_P2P, TP_BIN };
+    }
+    int meterChoiceIndex(int m) {
+	int[] choices = meterChoices();
+	for (int i = 0; i != choices.length; i++)
+	    if (choices[i] == m)
+		return i;
+	return 0;
+    }
+
     public void setEditValue(int n, EditInfo ei) {
 	if (n == 0) {
 	    if (ei.checkbox.getState())
@@ -338,7 +460,7 @@ class ProbeElm extends CircuitElm {
 		flags &= ~FLAG_SHOWVOLTAGE;
 	}
         if (n==1){
-            meter = ei.choice.getSelectedIndex();
+            meter = meterChoices()[ei.choice.getSelectedIndex()];
         }
         if (n == 2)
             scale = ei.choice.getSelectedIndex();

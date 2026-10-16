@@ -1,6 +1,9 @@
 package com.lushprojects.circuitjs1.client;
 
-/*    
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
+/*
     Copyright (C) Paul Falstad and Iain Sharp
     
     This file is part of CircuitJS1.
@@ -34,9 +37,11 @@ class TestPointElm extends CircuitElm {
     final int TP_PER = 7;
     final int TP_PWI = 8;
     final int TP_DUT = 9; //mark to space ratio
+    final int TP_AVG = 10;
     final int FLAG_LABEL = 1;
     int zerocount=0;
     double rmsV=0, total, count;
+    double avgV=0, totalV;
     double maxV=0, lastMaxV;
     double minV=0, lastMinV;
     double frequency=0;
@@ -49,7 +54,8 @@ class TestPointElm extends CircuitElm {
     
     double voltages[];
     boolean increasingV=true, decreasingV=true;
-    long periodStart, periodLength, pulseStart;//time between consecutive max values
+    boolean started=false;
+    double periodStart, periodLength, pulseStart;//simulated time between consecutive max values
     String label;
     
     public TestPointElm(int xx, int yy) { 
@@ -72,20 +78,44 @@ class TestPointElm extends CircuitElm {
         super.setPoints();
         lead1 = new Point();
     }
-    String dump() {
-	boolean writeLabel = (!label.equals("TP"));
-	flags = (writeLabel) ? (flags | FLAG_LABEL) : (flags & ~FLAG_LABEL);
-        String str = super.dump() + " " + meter;
-	if (writeLabel)
-	    str += " " + CustomLogicModel.escape(label);
-	return str;
+
+    void reset() {
+        super.reset();
+        zerocount = 0;
+        rmsV = total = count = 0;
+        avgV = totalV = 0;
+        maxV = lastMaxV = 0;
+        minV = lastMinV = 0;
+        binaryLevel = 0;
+        period = pulseWidth = dutyCycle = 0;
+        selectedValue = 0;
+        periodStart = periodLength = pulseStart = 0;
+        increasingV = true;
+        decreasingV = true;
+        started = false;
+        lastStepCount = 0;
     }
+
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "me", meter);
+	if (!label.equals("TP"))
+	    XMLSerializer.dumpAttr(elem, "lb", label);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	meter = xml.parseIntAttr("me", meter);
+	label = xml.parseStringAttr("lb", "TP");
+    }
+
     String getMeter(){
         switch (meter) {
         case TP_VOL:
             return "V";
         case TP_RMS:
             return "V(rms)";
+        case TP_AVG:
+            return "V(avg)";
         case TP_MAX:
             return "Vmax";
         case TP_MIN:
@@ -153,6 +183,9 @@ class TestPointElm extends CircuitElm {
             case TP_RMS:
                 s = getUnitText(rmsV,"V(rms)");
                 break;
+            case TP_AVG:
+                s = getUnitText(avgV,"V(avg)");
+                break;
             case TP_MAX:
                 s = getUnitText(lastMaxV,"Vpk");
                 break;
@@ -172,7 +205,7 @@ class TestPointElm extends CircuitElm {
 //                s = "percent:"+period + " " + sim.timeStep + " " + sim.simTime + " " + sim.getIterCount();
                 break;
             case TP_PWI:
-                s = getUnitText(pulseWidth, "S");
+                s = getUnitText(pulseWidth, "s");
                 break;
             case TP_DUT:
                 s = showFormat.format(dutyCycle);
@@ -193,16 +226,27 @@ class TestPointElm extends CircuitElm {
 	if (sim.timeStepCount == lastStepCount)
 	    return;
 	lastStepCount = sim.timeStepCount;
-        count++;//how many counts are in a cycle    
+        count++;//how many counts are in a cycle
         total += volts[0]*volts[0]; //sum of squares
+        totalV += volts[0];
 
+        // binary threshold is a fixed 2.5V (assumes ~5V logic levels); not scaled to the circuit's actual voltage range
         if (volts[0]<2.5)
             binaryLevel = 0;
         else
             binaryLevel = 1;
-        
-        
-        //V going up, track maximum value with 
+
+        if (!started) {
+            // prime max/min tracking with the first sample instead of the stale defaults (0, increasingV==decreasingV==true),
+            // which could otherwise register a bogus transition on the first step
+            started = true;
+            maxV = minV = volts[0];
+            increasingV = true;
+            decreasingV = false;
+            periodStart = pulseStart = sim.t;
+        }
+
+        //V going up, track maximum value with
         if (volts[0]>maxV && increasingV){
             maxV = volts[0];
             increasingV = true;
@@ -211,10 +255,10 @@ class TestPointElm extends CircuitElm {
         if (volts[0]<maxV && increasingV){//change of direction V now going down - at start of waveform
             lastMaxV=maxV; //capture last maximum 
             //capture time between
-            periodLength = System.currentTimeMillis() - periodStart;
-            periodStart = System.currentTimeMillis();
+            periodLength = sim.t - periodStart;
+            periodStart = sim.t;
             period = periodLength;
-            pulseWidth = System.currentTimeMillis() - pulseStart;
+            pulseWidth = sim.t - pulseStart;
             dutyCycle = pulseWidth / periodLength;
             minV=volts[0]; //track minimum value with V
             increasingV=false;
@@ -225,9 +269,13 @@ class TestPointElm extends CircuitElm {
             rmsV = Math.sqrt(total);
             if (Double.isNaN(rmsV))
                 rmsV=0;
+            avgV = totalV/count;
+            if (Double.isNaN(avgV))
+                avgV=0;
             count=0;
             total=0;
-            
+            totalV=0;
+
         }
         if (volts[0]<minV && decreasingV){ //V going down, track minimum value with V
             minV=volts[0];
@@ -237,7 +285,7 @@ class TestPointElm extends CircuitElm {
 
         if (volts[0]>minV && decreasingV){ //change of direction V now going up
             lastMinV=minV; //capture last minimum
-            pulseStart =  System.currentTimeMillis();
+            pulseStart =  sim.t;
             maxV = volts[0];
             increasingV = true;
             decreasingV = false;
@@ -247,10 +295,13 @@ class TestPointElm extends CircuitElm {
             rmsV = Math.sqrt(total);
             if (Double.isNaN(rmsV))
                 rmsV=0;
+            avgV = totalV/count;
+            if (Double.isNaN(avgV))
+                avgV=0;
             count=0;
             total=0;
+            totalV=0;
 
-            
         }
         //need to zero the rms value if it stays at 0 for a while
         if (volts[0]==0){
@@ -258,6 +309,7 @@ class TestPointElm extends CircuitElm {
             if (zerocount > 5){
                 total=0;
                 rmsV=0;
+                avgV=0;
                 maxV=0;
                 minV=0;
             }
@@ -270,6 +322,9 @@ class TestPointElm extends CircuitElm {
             break;
         case TP_RMS:
             selectedValue = rmsV;
+            break;
+        case TP_AVG:
+            selectedValue = avgV;
             break;
         case TP_MAX:
             selectedValue = lastMaxV;
@@ -312,38 +367,48 @@ class TestPointElm extends CircuitElm {
     
     void getInfo(String arr[]) {
         arr[0] = "Test Point";
-        switch (meter) {
+        int i = 1;
+        arr[i++] = getMeterLine(meter);
+        // show the rest of the already-tracked values too, skipping whichever one is selected above.
+        // frequency is left out here because it isn't actually computed anywhere (see getMeterLine);
+        // binary value is left out to make room for average, since arr[] only has room for 10 entries total
+        if (meter != TP_VOL) arr[i++] = getMeterLine(TP_VOL);
+        if (meter != TP_MAX) arr[i++] = getMeterLine(TP_MAX);
+        if (meter != TP_MIN) arr[i++] = getMeterLine(TP_MIN);
+        if (meter != TP_RMS) arr[i++] = getMeterLine(TP_RMS);
+        if (meter != TP_AVG) arr[i++] = getMeterLine(TP_AVG);
+        if (meter != TP_P2P) arr[i++] = getMeterLine(TP_P2P);
+        if (meter != TP_PER) arr[i++] = getMeterLine(TP_PER);
+        if (meter != TP_PWI) arr[i++] = getMeterLine(TP_PWI);
+        if (meter != TP_DUT) arr[i++] = getMeterLine(TP_DUT);
+    }
+
+    String getMeterLine(int m) {
+        switch (m) {
             case TP_VOL:
-                arr[1] = "V = " + getUnitText(volts[0], "V");
-                break;
+                return "V = " + getUnitText(volts[0], "V");
             case TP_RMS:
-                arr[1] = "V(rms) = " + getUnitText(rmsV, "V");
-                break;
+                return "V(rms) = " + getUnitText(rmsV, "V");
+            case TP_AVG:
+                return "V(avg) = " + getUnitText(avgV, "V");
             case TP_MAX:
-                arr[1] = "Vmax = " + getUnitText(lastMaxV, "Vpk");
-                break;
+                return "Vmax = " + getUnitText(lastMaxV, "Vpk");
             case TP_MIN:
-                arr[1] = "Vmin = " + getUnitText(lastMinV, "Vmin");
-                break;
+                return "Vmin = " + getUnitText(lastMinV, "Vmin");
             case TP_P2P:
-                arr[1] = "Vp2p = " + getUnitText(lastMaxV-lastMinV, "Vp2p");
-                break;
+                return "Vp2p = " + getUnitText(lastMaxV-lastMinV, "Vp2p");
             case TP_BIN:
-                arr[1] = "Binary:" + binaryLevel + "";
-                break;
+                return "Binary:" + binaryLevel;
             case TP_FRQ:
-                arr[1] = "Freq = " + getUnitText(frequency, "Hz");
-                break;
+                return "Freq = " + getUnitText(frequency, "Hz");
             case TP_PER:
-                arr[1] = "Period = " + getUnitText(period*sim.maxTimeStep/sim.getIterCount(), "S");
-                break;
+                return "Period = " + getUnitText(period, "s");
             case TP_PWI:
-                arr[1] = "Pulse width = " + getUnitText(pulseWidth*sim.maxTimeStep*sim.getIterCount(), "S");
-                break;
+                return "Pulse width = " + getUnitText(pulseWidth, "s");
             case TP_DUT:
-                arr[1] = "Duty cycle = " + showFormat.format(dutyCycle);
-                break;
-        }    
+                return "Duty cycle = " + showFormat.format(dutyCycle);
+        }
+        return "";
     }
         
 //    void drawHandles(Graphics g, Color c) {
@@ -357,15 +422,18 @@ class TestPointElm extends CircuitElm {
             ei.choice = new Choice();
             ei.choice.add("Voltage");
             ei.choice.add("RMS Voltage");
+            ei.choice.add("Average Voltage");
             ei.choice.add("Max Voltage");
             ei.choice.add("Min Voltage");
             ei.choice.add("P2P Voltage");
-            ei.choice.add("Binary Value");        
+            ei.choice.add("Binary Value");
             //ei.choice.add("Frequency");
             //ei.choice.add("Period");
             //ei.choice.add("Pulse Width");
             //ei.choice.add("Duty Cycle");
-            ei.choice.select(meter);
+            // TP_AVG's value isn't contiguous with the other meter constants shown here (it was
+            // appended after TP_DUT to avoid renumbering saved circuits), so map it explicitly.
+            ei.choice.select(meterChoiceIndex(meter));
             return ei;
         }
         if (n == 1) {
@@ -377,13 +445,24 @@ class TestPointElm extends CircuitElm {
 	return null;
     }
 
+    int[] meterChoices() {
+	return new int[] { TP_VOL, TP_RMS, TP_AVG, TP_MAX, TP_MIN, TP_P2P, TP_BIN };
+    }
+    int meterChoiceIndex(int m) {
+	int[] choices = meterChoices();
+	for (int i = 0; i != choices.length; i++)
+	    if (choices[i] == m)
+		return i;
+	return 0;
+    }
+
     public void setEditValue(int n, EditInfo ei) {
         if (n==0){
-            meter = ei.choice.getSelectedIndex();
+            meter = meterChoices()[ei.choice.getSelectedIndex()];
         }
         if (n == 1)
             label = ei.textf.getText();
     }
-    
+
 }
 

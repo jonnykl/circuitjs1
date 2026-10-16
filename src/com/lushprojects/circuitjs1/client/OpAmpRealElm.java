@@ -1,5 +1,8 @@
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
 public class OpAmpRealElm extends CompositeElm {
 
     // from https://commons.wikimedia.org/wiki/File:OpAmpTransistorLevel_Colored_Labeled.svg
@@ -149,12 +152,29 @@ public class OpAmpRealElm extends CompositeElm {
 	return ((CapacitorElm) compElmList.get(modelType == MODEL_741 ? 20 : 4));
     }
     
-    public String dump() {
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "slr", slewRate);
+	XMLSerializer.dumpAttr(elem, "cl", currentLimit);
+	XMLSerializer.dumpAttr(elem, "mt", modelType);
+    }
+    void dumpXmlState(Document doc, Element elem) {
 	CapacitorElm elm = getCapacitor();
 	double voltdiff = (elm == null) ? 0 : elm.voltdiff;
-	return super.dumpWithMask(0) + " " + slewRate + " " + voltdiff + " " + currentLimit + " " + modelType;
+	XMLSerializer.dumpAttr(elem, "vd", voltdiff);
     }
-    
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	slewRate = xml.parseDoubleAttr("slr", slewRate);
+	currentLimit = xml.parseDoubleAttr("cl", currentLimit);
+	modelType = xml.parseIntAttr("mt", modelType);
+	double voltdiff = xml.parseDoubleAttr("vd", 0);
+	initModel();
+	CapacitorElm cap = getCapacitor();
+	if (cap != null)
+	    cap.voltdiff = voltdiff;
+    }
+
     public boolean getConnection(int n1, int n2) {
 	return true;
     }
@@ -213,7 +233,7 @@ public class OpAmpRealElm extends CompositeElm {
         interpPoint2(lead1 , lead2,  textp[0], textp[1], .2, hsswap);
         
         // position rails; ideally in middle, but may need to be off-center to fit grid
-        double railPos = .5 - ((dn/2) % sim.gridSize)/(ww*2);
+        double railPos = .5 - ((dn/2) % app.gridSize)/(ww*2);
         interpPoint2(lead1 , lead2,  rail1p[1], rail2p[1], railPos, hs*2*(1-railPos));
         interpPoint2(lead1 , lead2,  rail1p[0], rail2p[0], railPos, hs*2);
         
@@ -234,6 +254,7 @@ public class OpAmpRealElm extends CompositeElm {
 	return 409;
     }
 
+    String getElmType() { return "op-amp"; }
     void getInfo(String arr[]) {
 	String type = (modelType == MODEL_741) ? "LM741" : "LM324";
         arr[0] = "op-amp (" + type + ")";

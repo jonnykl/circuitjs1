@@ -19,9 +19,14 @@
 
 package com.lushprojects.circuitjs1.client;
 
-    class InverterElm extends CircuitElm {
+    import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+class InverterElm extends CircuitElm {
 	double slewRate; // V/ns
 	double highVoltage;
+	final int FLAG_DEMORGAN = 1<<3;
+
 	public InverterElm(int xx, int yy) {
 	    super(xx, yy);
 	    noDiagonal = true;
@@ -45,6 +50,18 @@ package com.lushprojects.circuitjs1.client;
 	String dump() {
 	    return super.dump() + " " + slewRate + " " + highVoltage;
 	}
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "sl", slewRate);
+	    XMLSerializer.dumpAttr(elem, "hi", highVoltage);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    slewRate = xml.parseDoubleAttr("sl", slewRate);
+	    highVoltage = xml.parseDoubleAttr("hi", highVoltage);
+	}
 	
 	int getDumpType() { return 'I'; }
 	
@@ -61,6 +78,11 @@ package com.lushprojects.circuitjs1.client;
 	    curcount = updateDotCount(current, curcount);
 	    drawDots(g, lead2, point2, curcount);
 	}
+
+        void addRoutingObstacle(WireRouter router) {
+            addRoutingObstacleWithLeads(router, 16);
+        }
+
 	Polygon gatePoly;
 	Point pcircle;
 	void setPoints() {
@@ -71,7 +93,18 @@ package com.lushprojects.circuitjs1.client;
 		ww = (int) (dn/2);
 	    lead1 = interpPoint(point1, point2, .5-ww/dn);
 	    lead2 = interpPoint(point1, point2, .5+(ww+2)/dn);
-	    pcircle = interpPoint(point1, point2, .5+(ww-2)/dn);
+
+	    Point start;
+	    double end;
+	    if (hasFlag(FLAG_DEMORGAN)) {
+		pcircle = interpPoint(point1, point2, .5-(ww-4)/dn);	// Move circle to front
+		start = interpPoint(point1, point2, .5-(ww-8)/dn);	// Shift triangle so overall
+		end = .5+(ww+2)/dn;					// symbol takes up same space
+	    } else {
+		pcircle = interpPoint(point1, point2, .5+(ww-1)/dn);	// Normal symbol circle
+		start = lead1;
+		end = .5+(ww-5)/dn;
+	    }
 	    
 	    if (GateElm.useEuroGates()) {
 		Point pts[] = newPointArray(4);
@@ -82,15 +115,16 @@ package com.lushprojects.circuitjs1.client;
 		center = interpPoint(lead1, l2, .5);
 	    } else {
 		Point triPoints[] = newPointArray(3);
-		interpPoint2(lead1, lead2, triPoints[0], triPoints[1], 0, hs);
-		triPoints[2] = interpPoint(point1, point2, .5+(ww-5)/dn);
+			interpPoint2(start, lead2, triPoints[0], triPoints[1], 0, hs);
+			triPoints[2] = interpPoint(point1, point2, end);
 		gatePoly = createPolygon(triPoints);
 	    }
 	    setBbox(point1, point2, hs);
 	}
 	int getVoltageSourceCount() { return 1; }
+	void setHighVoltage(double hv) { highVoltage = hv; }
 	void stamp() {
-	    sim.stampVoltageSource(0, nodes[1], voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[1], voltSource);
 	}
 	
 	double lastOutputVoltage;
@@ -102,7 +136,7 @@ package com.lushprojects.circuitjs1.client;
 	    double out = volts[0] > highVoltage*.5 ? 0 : highVoltage;
 	    double maxStep = slewRate * sim.timeStep * 1e9;
 	    out = Math.max(Math.min(lastOutputVoltage+maxStep, out), lastOutputVoltage-maxStep);
-	    sim.updateVoltageSource(0, nodes[1], voltSource, out);
+	    sim.updateVoltageSource(CircuitNode.ground, nodes[1], voltSource, out);
 	}
 	double getVoltageDiff() { return volts[0]; }
 	void getInfo(String arr[]) {
@@ -114,7 +148,9 @@ package com.lushprojects.circuitjs1.client;
 	    if (n == 0)
 		return new EditInfo("Slew Rate (V/ns)", slewRate, 0, 0);
 	    if (n == 1)
-		return new EditInfo("High Logic Voltage", highVoltage, 1, 10);
+		return new EditInfo("High Logic Voltage", highVoltage, 1, 10).setUnitStep();
+	    if (n == 2)
+		return EditInfo.createCheckbox("DeMorgan's Symbol", hasFlag(FLAG_DEMORGAN));
 	    return null;
 	}
 	public void setEditValue(int n, EditInfo ei) {
@@ -122,9 +158,17 @@ package com.lushprojects.circuitjs1.client;
 		slewRate = ei.value;
 	    if (n == 1)
 		highVoltage = GateElm.lastHighVoltage = ei.value;
+	    if (n == 2) {
+		if (ei.checkbox.getState())
+		    flags |= FLAG_DEMORGAN;
+		else
+		    flags &= ~FLAG_DEMORGAN;
+		setPoints();
+	    }
 	}
 	// there is no current path through the inverter input, but there
 	// is an indirect path through the output to ground.
+	boolean validate() { return validateRailNode(1); }
 	boolean getConnection(int n1, int n2) { return false; }
 	boolean hasGroundConnection(int n1) {
 	    return (n1 == 1);

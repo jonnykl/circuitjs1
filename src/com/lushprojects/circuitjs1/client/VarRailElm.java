@@ -20,6 +20,8 @@
 package com.lushprojects.circuitjs1.client;
 
 import com.google.gwt.user.client.ui.Label;
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 import com.google.gwt.event.dom.client.MouseWheelEvent;
 import com.google.gwt.event.dom.client.MouseWheelHandler;
@@ -43,16 +45,26 @@ import com.google.gwt.event.dom.client.MouseWheelHandler;
 	    sliderText=sliderText.replaceAll("%2[bB]", "+");
 	    createSlider();
 	}
-	String dump() {
-	    return super.dump() + " " + sliderText.replaceAll("\\+","%2B");
+
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "st", sliderText);
 	}
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    sliderText = xml.parseStringAttr("st", sliderText);
+	    label.setText(Locale.LS(sliderText));
+	    int value = (int) ((frequency-bias)*100/(maxVoltage-bias));
+	    slider.setValue(value);
+	}
+
 	int getDumpType() { return 172; }
 	void createSlider() {
 	    waveform = WF_VAR;
-	    sim.addWidgetToVerticalPanel(label = new Label(Locale.LS(sliderText)));
+	    app.addWidgetToVerticalPanel(label = new Label(Locale.LS(sliderText)));
 	    label.addStyleName("topSpace");
 	    int value = (int) ((frequency-bias)*100/(maxVoltage-bias));
-	    sim.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101 ,
+	    app.addWidgetToVerticalPanel(slider = new Scrollbar(Scrollbar.HORIZONTAL, value, 1, 0, 101 ,
 	    		null, this));
 //	    sim.verticalPanel.validate();
 	}
@@ -61,15 +73,15 @@ import com.google.gwt.event.dom.client.MouseWheelHandler;
 	    return frequency;
 	}
 	void delete() {
-	    sim.removeWidgetFromVerticalPanel(label);
-	    sim.removeWidgetFromVerticalPanel(slider);
+	    app.removeWidgetFromVerticalPanel(label);
+	    app.removeWidgetFromVerticalPanel(slider);
             super.delete();
 	}
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo("Min Voltage", bias, -20, 20);
+		return new EditInfo("Min Voltage", bias, -20, 20).setUnitStep();
 	    if (n == 1)
-		return new EditInfo("Max Voltage", maxVoltage, -20, 20);
+		return new EditInfo("Max Voltage", maxVoltage, -20, 20).setUnitStep();
 	    if (n == 2) {
 		EditInfo ei = new EditInfo("Slider Text", 0, -1, -1);
 		ei.text = sliderText;
@@ -85,7 +97,7 @@ import com.google.gwt.event.dom.client.MouseWheelHandler;
 	    if (n == 2) {
 		sliderText = ei.textf.getText();
 		label.setText(Locale.LS(sliderText));
-		sim.setiFrameHeight();
+		app.setiFrameHeight();
 	    }
 	}
 	int getShortcut() { return 0; }

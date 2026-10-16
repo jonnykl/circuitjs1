@@ -53,7 +53,12 @@ class EditInfo {
 	}
 	
 	EditInfo setDimensionless() { dimensionless = true; return this; }
+	// use a plain +/-1 step (rather than the E12 preferred-value series) for the EditDialog
+	// stepper buttons; for quantities like voltage that aren't usually picked from E12 values
+	EditInfo setUnitStep() { unitStep = true; return this; }
 	EditInfo disallowSliders() { noSliders = true; return this; }
+	EditInfo setIsColor() { isColor = true; return this; }
+	EditInfo newColumn() { newColumn = true; return this; }
 	int changeFlag(int flags, int bit) {
 	    if (checkbox.getState())
 		return flags | bit;
@@ -76,11 +81,22 @@ class EditInfo {
 	Widget widget;
 	boolean newDialog;
 	boolean dimensionless;
+	boolean unitStep;
 	boolean noSliders;
+	boolean isColor;
+	boolean newColumn;
+	boolean positive;
+	boolean nonNegative;
 	double minVal, maxVal;
+	String error;
+	String errorFieldName;
+	void setError(String s) { error = s; }
+	EditInfo setErrorFieldName(String s) { errorFieldName = s; return this; }
+	EditInfo setPositive() { positive = true; return this; }
+	EditInfo setNonNegative() { nonNegative = true; return this; }
 	
 	// for slider dialog
-	TextBox minBox, maxBox, labelBox;
+	TextBox minBox, maxBox, labelBox, stepBox;
 	
 	boolean canCreateAdjustable() {
 	    return choice == null && checkbox == null && button == null && textArea == null &&

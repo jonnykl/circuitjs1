@@ -19,54 +19,130 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.event.dom.client.MouseWheelEvent;
+import com.google.gwt.event.dom.client.MouseWheelHandler;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+
+import java.util.Vector;
+
+import com.google.gwt.user.client.Window;
+import com.google.gwt.user.client.ui.Button;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
-class MosfetElm extends CircuitElm {
+class MosfetElm extends CircuitElm implements MouseWheelHandler {
 	int pnp;
 	int FLAG_PNP = 1;
 	int FLAG_SHOWVT = 2;
-	int FLAG_DIGITAL = 4;
 	int FLAG_FLIP = 8;
-	int FLAG_HIDE_BULK = 16;
-	int FLAG_BODY_DIODE = 32;
-	int FLAG_BODY_TERMINAL = 64;
-	int FLAGS_GLOBAL = (FLAG_HIDE_BULK|FLAG_DIGITAL);
+	// these bits are no longer set on new elements (the settings they controlled now live on
+	// MosfetModel), but the values are still needed to decode old circuit files that have them
+	// packed into the element's own flags.
+	int FLAG_DIGITAL_LEGACY = 4;
+	int FLAG_HIDE_BULK_LEGACY = 16;
+	int FLAG_BODY_DIODE_LEGACY = 32;
+	int FLAG_BODY_TERMINAL_LEGACY = 64;
+	int FLAG_SHOW_BODY_DIODE_LEGACY = 128;
 	int bodyTerminal;
-	
+
 	double vt;
 	// beta = 1/(RdsON*(Vgs-Vt))
 	double beta;
-	static int globalFlags;
+	// junction capacitance state (backward euler companion model)
+	double capVoltGS, capVoltGD;
+	double capCurGS, capCurGD;
+	double geqGS, geqGD;
+	double ceqGS, ceqGD;
 	Diode diodeB1, diodeB2;
 	double diodeCurrent1, diodeCurrent2, bodyCurrent;
 	double curcount_body1, curcount_body2;
-	static double lastBeta;
-	
+	double curcount_gate;
+	double curcount_source, curcount_drain;
+	String modelName;
+	MosfetModel model;
+	static String lastModelName = "default";
+
+	// cached copies of the model's drawing/behavior settings, refreshed in setup().  Cached
+	// (rather than read from model directly) because getPostCount() is called from the base
+	// CircuitElm constructor before our own "model" field is assigned; see DiodeElm.hasResistance
+	// for the same pattern.
+	boolean bulkShown, digitalSymbolShown, bodyDiodeSimulated, bodyTerminalShown, bodyDiodeSymbolShown;
+
 	MosfetElm(int xx, int yy, boolean pnpflag) {
 	    super(xx, yy);
 	    pnp = (pnpflag) ? -1 : 1;
 	    flags = (pnpflag) ? FLAG_PNP : 0;
-	    flags |= FLAG_BODY_DIODE;
 	    noDiagonal = true;
 	    setupDiodes();
-	    beta = getDefaultBeta();
-	    vt = getDefaultThreshold();
+	    modelName = getLastModelName();
+	    setup();
 	}
-	
+
+	// is this a JFET (vs. a MOSFET)?  Both share MosfetModel; this only affects
+	// which default model is used and which UI options are shown.
+	boolean isJfet() { return false; }
+
+	String getLastModelName() { return lastModelName; }
+	void setLastModelName(String n) { lastModelName = n; }
+
 	public MosfetElm(int xa, int ya, int xb, int yb, int f,
 			 StringTokenizer st) {
 	    super(xa, ya, xb, yb, f);
 	    pnp = ((f & FLAG_PNP) != 0) ? -1 : 1;
 	    noDiagonal = true;
 	    setupDiodes();
-	    vt = getDefaultThreshold();
-	    beta = getBackwardCompatibilityBeta();
+	    double vt0 = getDefaultThreshold();
+	    double beta0 = getBackwardCompatibilityBeta();
 	    try {
-		vt = new Double(st.nextToken()).doubleValue();
-		beta = new Double(st.nextToken()).doubleValue();
+		vt0 = new Double(st.nextToken()).doubleValue();
+		beta0 = new Double(st.nextToken()).doubleValue();
 	    } catch (Exception e) {}
-	    globalFlags = flags & (FLAGS_GLOBAL);
-	    allocNodes(); // make sure volts[] has the right number of elements when hasBodyTerminal() is true 
+	    model = legacyModel(vt0, beta0, flags);
+	    modelName = model.name;
+	    setup();
+	    allocNodes(); // make sure volts[] has the right number of elements when hasBodyTerminal() is true
+	}
+
+	// build (or find) a model matching the drawing/behavior bits from a pre-model circuit
+	// file, where they were packed into the element's own flags instead of into a model.
+	// Used for both the old plain-text format (StringTokenizer constructor) and old XML saves
+	// (undumpXml, when there's no "mo" model-name attribute).  Also strips those bits out of
+	// our own flags field, since they're no longer meaningful there.
+	MosfetModel legacyModel(double vt0, double beta0, int legacyFlags) {
+	    // JFETs never showed a bulk terminal, so FLAG_HIDE_BULK_LEGACY was never meaningfully
+	    // set/unset for them; force it false here so legacy JFETs match default-jfet (whose
+	    // showBulk is also false) instead of spawning a spurious "old-jfet" model.
+	    boolean legacyShowBulk = !isJfet() && (legacyFlags & (FLAG_DIGITAL_LEGACY|FLAG_HIDE_BULK_LEGACY)) == 0;
+	    boolean legacyDigital = (legacyFlags & FLAG_DIGITAL_LEGACY) != 0;
+	    boolean legacyBodyDiode = (legacyFlags & FLAG_BODY_DIODE_LEGACY) != 0;
+	    boolean legacyBodyTerminal = (legacyFlags & FLAG_BODY_TERMINAL_LEGACY) != 0;
+	    boolean legacyShowBodyDiode = (legacyFlags & FLAG_SHOW_BODY_DIODE_LEGACY) != 0;
+	    flags &= ~(FLAG_DIGITAL_LEGACY|FLAG_HIDE_BULK_LEGACY|FLAG_BODY_DIODE_LEGACY|
+		       FLAG_BODY_TERMINAL_LEGACY|FLAG_SHOW_BODY_DIODE_LEGACY);
+	    return MosfetModel.getModelWithParameters(vt0, beta0, isJfet(), legacyShowBulk,
+		    legacyBodyDiode, legacyBodyTerminal, legacyDigital, legacyShowBodyDiode);
+	}
+
+	void setup() {
+	    model = MosfetModel.getModelWithNameOrCopy(modelName, model, isJfet());
+	    modelName = model.name;
+	    vt = model.threshold;
+	    beta = model.beta;
+	    bulkShown = model.showBulk;
+	    digitalSymbolShown = !bulkShown && model.digitalSymbol;
+	    bodyDiodeSimulated = bulkShown && model.bodyDiode;
+	    bodyTerminalShown = bodyDiodeSimulated && model.bodyTerminal;
+	    bodyDiodeSymbolShown = bodyDiodeSimulated && model.showBodyDiodeSymbol;
+	    allocNodes(); // post count may have changed (e.g. bodyTerminalShown)
+	}
+
+	boolean hasGateCaps() {
+	    return model.capGS > 0 || model.capGD > 0;
+	}
+
+	public void updateModels() {
+	    setup();
+	    setPoints();
 	}
 
 	// set up body diodes
@@ -79,39 +155,71 @@ class MosfetElm extends CircuitElm {
 	    diodeB2.setupForDefaultModel();
 	}
 	
+	// fallback vt/beta for old files with no configurable beta.  JfetElm overrides these.
 	double getDefaultThreshold() { return 1.5; }
-	
-	// default beta for new elements
-	double getDefaultBeta() { return lastBeta == 0 ? getBackwardCompatibilityBeta() : lastBeta; }
-	
+
 	// default for elements in old files with no configurable beta.  JfetElm overrides this.
 	// Not sure where this value came from, but the ZVP3306A has a beta of about .027.  Power MOSFETs have much higher betas (like 80 or more)
 	double getBackwardCompatibilityBeta() { return .02; }
 	
 	boolean nonLinear() { return true; }
-	boolean drawDigital() { return (flags & FLAG_DIGITAL) != 0; }
-	boolean showBulk() { return (flags & (FLAG_DIGITAL|FLAG_HIDE_BULK)) == 0; }
-	boolean hasBodyTerminal() { return (flags & FLAG_BODY_TERMINAL) != 0 && doBodyDiode(); }
-	boolean doBodyDiode() { return (flags & FLAG_BODY_DIODE) != 0 && showBulk(); }
+	boolean drawDigital() { return digitalSymbolShown; }
+	boolean showBulk() { return bulkShown; }
+	boolean hasBodyTerminal() { return bodyTerminalShown; }
+	boolean doBodyDiode() { return bodyDiodeSimulated; }
+	boolean showBodyDiode() { return bodyDiodeSymbolShown; }
 	void reset() {
 	    lastv1 = lastv2 = volts[0] = volts[1] = volts[2] = curcount = 0;
-	    curcount_body1 = curcount_body2 = 0;
+	    curcount_body1 = curcount_body2 = curcount_gate = curcount_source = curcount_drain = 0;
+	    capVoltGS = capVoltGD = capCurGS = capCurGD = 0;
+	    geqGS = geqGD = ceqGS = ceqGD = 0;
 	    diodeB1.reset();
 	    diodeB2.reset();
 	    if (doBodyDiode())
 		volts[bodyTerminal] = 0;
 	}
-	String dump() {
-	    return super.dump() + " " + vt + " " + beta;
+	public void onMouseWheel(MouseWheelEvent e) {
+	    if (CirSim.typeScrollPopup != null && CirSim.typeScrollPopup.isShowing()) {
+		CirSim.typeScrollPopup.doDeltaY(e.getDeltaY());
+		return;
+	    }
+	    CirSim.typeScrollPopup = new TypeScrollPopup(
+		e.getNativeEvent().getClientX(), e.getNativeEvent().getClientY(),
+		e.getDeltaY(), this, app);
 	}
+
 	int getDumpType() { return 'f'; }
+
+	void dumpXml(Document doc, Element elem) {
+	    if (!(model.builtIn || model.dumped))
+		model.dumpXml(doc);
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "mo", modelName);
+	}
+
+	void dumpXmlModel(Document doc) {
+	    if (!(model.builtIn || model.dumped))
+		model.dumpXml(doc);
+	}
+
+	void undumpXml(XMLDeserializer xml) {
+	    flags = 0;
+	    super.undumpXml(xml);
+	    modelName = xml.parseStringAttr("mo", null);
+	    if (modelName == null) {
+		// pre-model circuit file: vt/be were dumped directly on the element, and the
+		// drawing/behavior options were packed into our own flags
+		double vt0 = xml.parseDoubleAttr("vt", getDefaultThreshold());
+		double beta0 = xml.parseDoubleAttr("be", getBackwardCompatibilityBeta());
+		model = legacyModel(vt0, beta0, flags);
+		modelName = model.name;
+	    }
+	    setup();
+            pnp = ((flags & FLAG_PNP) != 0) ? -1 : 1;
+	}
 	final int hs = 16;
-	
+
 	void draw(Graphics g) {
-	    // pick up global flags changes
-	    if ((flags & FLAGS_GLOBAL) != globalFlags)
-		setPoints();
-	    
 		setBbox(point1, point2, hs);
 		
 		// draw source/drain terminals
@@ -124,7 +232,7 @@ class MosfetElm extends CircuitElm {
 		int segments = 6;
 		int i;
 		setPowerColor(g, true);
-		boolean power = sim.powerCheckItem.getState();
+		boolean power = showPower();
 		double segf = 1./segments;
 		boolean enhancement = vt > 0 && showBulk();
 		for (i = 0; i != segments; i++) {
@@ -152,7 +260,37 @@ class MosfetElm extends CircuitElm {
 			drawThickLine(g, pnp == -1 ? drn[0] : src[0], body[0]);
 		    drawThickLine(g, body[0], body[1]);
 		}
-		
+
+		// draw body diode symbol(s)
+		if (showBodyDiode()) {
+		    if (!hasBodyTerminal()) {
+			// single offset diode with L-shaped leads
+			setVoltageColor(g, volts[1]);
+			g.fillPolygon(bodyDiodePoly);
+			drawThickLine(g, src[0], bodyDiodeLeads[0]);
+			drawThickLine(g, bodyDiodeLeads[0], bodyDiodeLeads[1]);
+			setVoltageColor(g, volts[2]);
+			drawThickLine(g, bodyDiodeCathode[0], bodyDiodeCathode[1]);
+			drawThickLine(g, bodyDiodeLeads[2], bodyDiodeLeads[3]);
+			drawThickLine(g, drn[0], bodyDiodeLeads[3]);
+			adjustBbox(bodyDiodeLeads[0], bodyDiodeLeads[3]);
+		    } else {
+			// two inline diodes: src↔body and body↔drn
+			int anode1 = (pnp == 1) ? bodyTerminal : 1;
+			int cathode1 = (pnp == 1) ? 1 : bodyTerminal;
+			setVoltageColor(g, volts[anode1]);
+			g.fillPolygon(bodyDiodePoly);
+			setVoltageColor(g, volts[cathode1]);
+			g.drawLine(bodyDiodeCathode[0], bodyDiodeCathode[1]);
+			int anode2 = (pnp == 1) ? bodyTerminal : 2;
+			int cathode2 = (pnp == 1) ? 2 : bodyTerminal;
+			setVoltageColor(g, volts[anode2]);
+			g.fillPolygon(bodyDiodePoly2);
+			setVoltageColor(g, volts[cathode2]);
+			g.drawLine(bodyDiodeCathode2[0], bodyDiodeCathode2[1]);
+		    }
+		}
+
 		// draw arrow
 		if (!drawDigital()) {
 		    setVoltageColor(g, volts[bodyTerminal]);
@@ -174,20 +312,33 @@ class MosfetElm extends CircuitElm {
 			g.setFont(unitsFont);
 			drawCenteredText(g, s, x2+2, y2, false);
 		}
-		curcount = updateDotCount(-ids, curcount);
-		drawDots(g, src[0], src[1], curcount);
-		drawDots(g, src[1], drn[1], curcount);
-		drawDots(g, drn[1], drn[0], curcount);
+		curcount_source = updateDotCount(-(ids + capCurGS), curcount_source);
+		curcount_drain = updateDotCount(-ids + capCurGD, curcount_drain);
+		drawDots(g, src[0], src[1], curcount_source);
+		drawDots(g, src[1], drn[1], curcount_source);
+		drawDots(g, drn[1], drn[0], curcount_drain);
+
+		if (model.capGS > 0 || model.capGD > 0) {
+		    curcount_gate = updateDotCount(capCurGS + capCurGD, curcount_gate);
+		    drawDots(g, point1, gate[1], curcount_gate);
+		}
 		
 		if (showBulk()) {
 		    curcount_body1 = updateDotCount(diodeCurrent1, curcount_body1);
 		    curcount_body2 = updateDotCount(diodeCurrent2, curcount_body2);
-		    drawDots(g, src [0], body[0], -curcount_body1);
-		    drawDots(g, body[0], drn [0],  curcount_body2);
+		    if (showBodyDiode() && !hasBodyTerminal()) {
+			double cur = -curcount_body1 + curcount_body2;
+			drawDots(g, src [0], bodyDiodeLeads[0], cur);
+			drawDots(g, bodyDiodeLeads[0], bodyDiodeLeads[3], cur);
+			drawDots(g, bodyDiodeLeads[3], drn [0],  cur);
+		    } else {
+			drawDots(g, src [0], body[0], -curcount_body1);
+			drawDots(g, body[0], drn [0],  curcount_body2);
+		    }
 		}
 		
 		// label pins when highlighted
-		if (needsHighlight() || sim.dragElm == this) {
+		if (needsHighlight() || isCreating()) {
 		    g.setColor(whiteColor);
 		    g.setFont(unitsFont);
 
@@ -197,8 +348,9 @@ class MosfetElm extends CircuitElm {
 		    int dsyn = dy == 0 ? 0 : 1;
 
 		    g.drawString("G", gate[1].x - (dx < 0 ? -2 : 12), gate[1].y + ((dy > 0) ? -5 : 12));
-		    g.drawString(pnp == -1 ? "D" : "S", src[0].x-3+9*(dsx-dsyn*pnp), src[0].y+4);
-		    g.drawString(pnp == -1 ? "S" : "D", drn[0].x-3+9*(dsx-dsyn*pnp), drn[0].y+4);
+		    int extra = showBodyDiode() && !hasBodyTerminal() && dy == 0 ? 16*dsign : 0;
+		    g.drawString(pnp == -1 ? "D" : "S", src[0].x-3+9*(dsx-dsyn*pnp)+extra, src[0].y+4);
+		    g.drawString(pnp == -1 ? "S" : "D", drn[0].x-3+9*(dsx-dsyn*pnp)+extra, drn[0].y+4);
 		    if (hasBodyTerminal())
 			g.drawString("B",  body[0].x-3+9*(dsx-dsyn*pnp),  body[0].y+4);
 		}	    
@@ -219,6 +371,11 @@ class MosfetElm extends CircuitElm {
 	    }
 	int getPostCount() { return hasBodyTerminal() ? 4 : 3; }
 
+	void addRoutingObstacle(WireRouter router) {
+	    router.addObstacle(new Point[] { gate[0], gate[2], src[0], drn[0], src[2], drn[2] });
+	    router.addWire(point1.x, point1.y, gate[1].x, gate[1].y);
+	}
+
 	int pcircler;
 	
 	// points for source and drain (these are swapped on PNP mosfets)
@@ -227,14 +384,13 @@ class MosfetElm extends CircuitElm {
 	// points for gate, body, and the little circle on PNP mosfets
 	Point gate[], body[], pcircle;
 	Polygon arrowPoly;
+	Polygon bodyDiodePoly, bodyDiodePoly2;
+	Point bodyDiodeCathode[], bodyDiodeCathode2[];
+	Point bodyDiodeLeads[];
 	
 	void setPoints() {
 	    super.setPoints();
 
-	    // these two flags apply to all mosfets
-	    flags &= ~FLAGS_GLOBAL;
-	    flags |= globalFlags;
-	    
 	    // find the coordinates of the various points we need to draw
 	    // the MOSFET.
 	    int hs2 = hs*dsign;
@@ -274,6 +430,46 @@ class MosfetElm extends CircuitElm {
 		pcircle = interpPoint(point1, point2, 1-dist/dn);
 		pcircler = 3;
 	    }
+
+	    if (showBodyDiode()) {
+		Point pa[] = newPointArray(2);
+		if (!hasBodyTerminal()) {
+		    // single diode offset from body line, with L-shaped leads
+		    int diodeHs = 6;
+		    bodyDiodeCathode = newPointArray(2);
+		    bodyDiodeLeads   = newPointArray(4);
+		    Point dp1 = interpPoint(src[0], drn[0], .5-(diodeHs/2.)/hs, -hs2);
+		    Point dp2 = interpPoint(src[0], drn[0], .5+(diodeHs/2.)/hs, -hs2);
+		    interpPoint2(dp1, dp2, pa[0], pa[1], 0, diodeHs);
+		    interpPoint2(dp1, dp2, bodyDiodeCathode[0], bodyDiodeCathode[1], 1, diodeHs);
+		    bodyDiodePoly = createPolygon(pa[0], pa[1], dp2);
+		    bodyDiodeLeads[0] = interpPoint(src[0], drn[0], 0, -hs2);
+		    bodyDiodeLeads[1] = dp1;
+		    bodyDiodeLeads[2] = dp2;
+		    bodyDiodeLeads[3] = interpPoint(src[0], drn[0], 1, -hs2);
+		} else {
+		    // two inline diodes: src[0]↔body[0] and body[0]↔drn[0], no offset
+		    // NPN: anode=body, cathode=src/drn;  PNP: anode=src/drn, cathode=body
+		    int diodeHs = 3;
+		    bodyDiodeCathode  = newPointArray(2);
+		    bodyDiodeCathode2 = newPointArray(2);
+		    Point a1  = (pnp == 1) ? body[0] : src[0];
+		    Point b1  = (pnp == 1) ? src[0]  : body[0];
+		    Point dp1 = interpPoint(a1, b1, .3);
+		    Point dp2 = interpPoint(a1, b1, .7);
+		    interpPoint2(dp1, dp2, pa[0], pa[1], 0, diodeHs);
+		    interpPoint2(dp1, dp2, bodyDiodeCathode[0], bodyDiodeCathode[1], 1, diodeHs);
+		    bodyDiodePoly = createPolygon(pa[0], pa[1], dp2);
+		    pa = newPointArray(2);
+		    Point a2 = (pnp == 1) ? body[0] : drn[0];
+		    Point b2 = (pnp == 1) ? drn[0]  : body[0];
+		    dp1 = interpPoint(a2, b2, .3);
+		    dp2 = interpPoint(a2, b2, .7);
+		    interpPoint2(dp1, dp2, pa[0], pa[1], 0, diodeHs);
+		    interpPoint2(dp1, dp2, bodyDiodeCathode2[0], bodyDiodeCathode2[1], 1, diodeHs);
+		    bodyDiodePoly2 = createPolygon(pa[0], pa[1], dp2);
+		}
+	    }
 	}
 
 	double lastv1, lastv2;
@@ -281,10 +477,25 @@ class MosfetElm extends CircuitElm {
 	int mode = 0;
 	double gm = 0;
 	
+	void startIteration() {
+	    if (sim.timeStep <= 0)
+		return;
+	    if (model.capGS > 0) {
+		geqGS = model.capGS / sim.timeStep;
+		ceqGS = -geqGS * capVoltGS;
+	    }
+	    if (model.capGD > 0) {
+		geqGD = model.capGD / sim.timeStep;
+		ceqGD = -geqGD * capVoltGD;
+	    }
+	}
+
 	void stamp() {
 	    sim.stampNonLinear(nodes[1]);
 	    sim.stampNonLinear(nodes[2]);
-	    
+	    if (hasGateCaps())
+		sim.stampNonLinear(nodes[0]);
+
 	    if (hasBodyTerminal())
 		bodyTerminal = 3;
 	    else
@@ -324,12 +535,22 @@ class MosfetElm extends CircuitElm {
 	
 	void stepFinished() {
 	    calculate(true);
-	    
+
 	    // fix current if body is connected to source or drain
 	    if (bodyTerminal == 1)
 		diodeCurrent1 = -diodeCurrent2;
 	    if (bodyTerminal == 2)
 		diodeCurrent2 = -diodeCurrent1;
+
+	    // save gate cap state for next time step
+	    if (model.capGS > 0 && geqGS > 0) {
+		capVoltGS = volts[0] - volts[1];
+		capCurGS = geqGS * capVoltGS + ceqGS;
+	    }
+	    if (model.capGD > 0 && geqGD > 0) {
+		capVoltGD = volts[0] - volts[2];
+		capCurGD = geqGD * capVoltGD + ceqGD;
+	    }
 	}
 
 	void doStep() {
@@ -391,16 +612,19 @@ class MosfetElm extends CircuitElm {
 		mode = 0;
 	    } else if (vds < vgs-vt) {
 		// linear
-		ids = beta*((vgs-vt)*vds - vds*vds*.5);
-		gm  = beta*vds;
-		Gds = beta*(vgs-vds-vt);
+		double lambda = model.lambda;
+		ids = beta*((vgs-vt)*vds - vds*vds*.5)*(1 + lambda*vds);
+		gm  = beta*vds*(1 + lambda*vds);
+		Gds = beta*((vgs-vds-vt)*(1 + lambda*vds) + lambda*((vgs-vt)*vds - vds*vds*.5));
 		mode = 1;
 	    } else {
-		// saturation; Gds = 0
-		gm  = beta*(vgs-vt);
-		// use very small Gds to avoid nonconvergence
-		Gds = 1e-8;
-		ids = .5*beta*(vgs-vt)*(vgs-vt) + (vds-(vgs-vt))*Gds;
+		// saturation; Gds = 0 without lambda
+		double lambda = model.lambda;
+		double vgs_vt = vgs - vt;
+		gm  = beta*vgs_vt*(1 + lambda*vds);
+		Gds = .5*beta*vgs_vt*vgs_vt*lambda;
+		if (Gds < 1e-8) Gds = 1e-8;
+		ids = .5*beta*vgs_vt*vgs_vt*(1 + lambda*vds);
 		mode = 2;
 	    }
 	    
@@ -433,22 +657,49 @@ class MosfetElm extends CircuitElm {
 	    
 	    sim.stampRightSide(nodes[drain],  rs);
 	    sim.stampRightSide(nodes[source], -rs);
+
+	    // gate capacitance companion model stamps (backward euler; avoids the
+	    // oscillatory behavior trapezoidal integration can cause when RC is
+	    // small relative to the timestep)
+	    // Cgs between gate (node 0) and node 1
+	    if (model.capGS > 0 && geqGS > 0) {
+		sim.stampMatrix(nodes[0], nodes[0],  geqGS);
+		sim.stampMatrix(nodes[1], nodes[1],  geqGS);
+		sim.stampMatrix(nodes[0], nodes[1], -geqGS);
+		sim.stampMatrix(nodes[1], nodes[0], -geqGS);
+		sim.stampRightSide(nodes[0], -ceqGS);
+		sim.stampRightSide(nodes[1],  ceqGS);
+	    }
+	    // Cgd between gate (node 0) and node 2
+	    if (model.capGD > 0 && geqGD > 0) {
+		sim.stampMatrix(nodes[0], nodes[0],  geqGD);
+		sim.stampMatrix(nodes[2], nodes[2],  geqGD);
+		sim.stampMatrix(nodes[0], nodes[2], -geqGD);
+		sim.stampMatrix(nodes[2], nodes[0], -geqGD);
+		sim.stampRightSide(nodes[0], -ceqGD);
+		sim.stampRightSide(nodes[2],  ceqGD);
+	    }
 	}
 	
 	void getFetInfo(String arr[], String n) {
-	    arr[0] = Locale.LS(((pnp == -1) ? "p-" : "n-") + n);
-	    arr[0] += " (Vt=" + getVoltageText(pnp*vt);
-	    arr[0] += ", \u03b2=" + beta + ")";
-	    arr[1] = ((pnp == 1) ? "Ids = " : "Isd = ") + getCurrentText(ids);
-	    arr[2] = "Vgs = " + getVoltageText(volts[0]-volts[pnp == -1 ? 2 : 1]);
-	    arr[3] = ((pnp == 1) ? "Vds = " : "Vsd = ") + getVoltageText(volts[2]-volts[1]);
-	    arr[4] = Locale.LS((mode == 0) ? "off" :
+	    arr[0] = Locale.LS(((pnp == -1) ? "p-" : "n-") + n) + " (" + modelName + ")";
+	    arr[1] = "Vt=" + getVoltageText(pnp*vt) + ", \u03b2=" + beta;
+	    arr[2] = ((pnp == 1) ? "Ids = " : "Isd = ") + getCurrentText(ids);
+	    arr[3] = "Vgs = " + getVoltageText(volts[0]-volts[pnp == -1 ? 2 : 1]);
+	    arr[4] = ((pnp == 1) ? "Vds = " : "Vsd = ") + getVoltageText(volts[2]-volts[1]);
+	    arr[5] = Locale.LS((mode == 0) ? "off" :
 		(mode == 1) ? "linear" : "saturation");
-	    arr[5] = "gm = " + getUnitText(gm, "A/V");
-	    arr[6] = "P = " + getUnitText(getPower(), "W");
+	    arr[6] = "gm = " + getUnitText(gm, "A/V");
+	    arr[7] = "P = " + getUnitText(getPower(), "W");
+	    int idx = 8;
 	    if (showBulk())
-		arr[7] = "Ib = " + getUnitText(bodyTerminal == 1 ? -diodeCurrent1 : bodyTerminal == 2 ? diodeCurrent2 : -pnp*(diodeCurrent1+diodeCurrent2), "A");
+		arr[idx++] = "Ib = " + getUnitText(bodyTerminal == 1 ? -diodeCurrent1 : bodyTerminal == 2 ? diodeCurrent2 : -pnp*(diodeCurrent1+diodeCurrent2), "A");
+	    if (model.capGS > 0)
+		arr[idx++] = "Cgs = " + getUnitText(model.capGS, "F");
+	    if (model.capGD > 0)
+		arr[idx] = "Cgd = " + getUnitText(model.capGD, "F");
 	}
+	String getElmType() { return "MOSFET"; }
 	void getInfo(String arr[]) {
 	    getFetInfo(arr, "MOSFET");
 	}
@@ -458,68 +709,88 @@ class MosfetElm extends CircuitElm {
 	boolean canViewInScope() { return true; }
 	double getVoltageDiff() { return volts[2] - volts[1]; }
 	boolean getConnection(int n1, int n2) {
+	    if (hasGateCaps())
+		return true;
 	    return !(n1 == 0 || n2 == 0);
 	}
+	boolean getMatrixConnection(int n1, int n2) { return true; }
+	Vector<MosfetModel> models;
+
+	// does this element support D/S swapping?  JfetElm overrides this to false since its
+	// setPoints() doesn't honor FLAG_FLIP.  (The rest of the mosfet-only options - bulk
+	// terminal, digital symbol, body diode - now live on MosfetModel, not here.)
+	boolean hasSwapDS() { return true; }
+
 	public EditInfo getEditInfo(int n) {
-		if (n == 0)
-			return new EditInfo("Threshold Voltage", pnp*vt, .01, 5);
-		if (n == 1)
-			return new EditInfo(EditInfo.makeLink("mosfet-beta.html", "Beta"), beta, .01, 5);
-		if (n == 2) {
-			EditInfo ei = new EditInfo("", 0, -1, -1);
-			ei.checkbox = new Checkbox("Show Bulk", showBulk());
-			return ei;
+		if (n == 0) {
+		    EditInfo ei = new EditInfo("Model", 0, -1, -1);
+		    models = MosfetModel.getModelList(isJfet());
+		    ei.choice = new Choice();
+		    for (int i = 0; i != models.size(); i++) {
+			MosfetModel mm = models.get(i);
+			ei.choice.add(mm.getDescription());
+			if (mm == model)
+			    ei.choice.select(i);
+		    }
+		    return ei;
 		}
-		if (n == 3) {
+		int idx = 1;
+		if (hasSwapDS()) {
+		    if (n == idx++) {
 			EditInfo ei = new EditInfo("", 0, -1, -1);
 			ei.checkbox = new Checkbox("Swap D/S", (flags & FLAG_FLIP) != 0);
 			return ei;
+		    }
 		}
-		if (n == 4 && !showBulk()) {
-			EditInfo ei = new EditInfo("", 0, -1, -1);
-			ei.checkbox = new Checkbox("Digital Symbol", drawDigital());
-			return ei;
+		if (n == idx) {
+		    EditInfo ei = new EditInfo("", 0, -1, -1);
+		    ei.button = new Button(Locale.LS("Create New Model"));
+		    return ei;
 		}
-		if (n == 4 && showBulk()) {
-			EditInfo ei = new EditInfo("", 0, -1, -1);
-			ei.checkbox = new Checkbox("Simulate Body Diode", (flags & FLAG_BODY_DIODE) != 0);
-			return ei;
+		if (n == idx+1) {
+		    if (model.readOnly)
+			return null;
+		    EditInfo ei = new EditInfo("", 0, -1, -1);
+		    ei.button = new Button(Locale.LS("Edit Model"));
+		    return ei;
 		}
-		if (n == 5 && doBodyDiode()) {
-			EditInfo ei = new EditInfo("", 0, -1, -1);
-			ei.checkbox = new Checkbox("Body Terminal", (flags & FLAG_BODY_TERMINAL) != 0);
-			return ei;
-		}
-
 		return null;
 	}
+
+	public void newModelCreated(MosfetModel mm) {
+	    model = mm;
+	    modelName = model.name;
+	    setup();
+	}
+
 	public void setEditValue(int n, EditInfo ei) {
-		if (n == 0)
-			vt = pnp*ei.value;
-		if (n == 1 && ei.value > 0)
-			beta = lastBeta = ei.value;	
-		if (n == 2) {
-		    globalFlags = (!ei.checkbox.getState()) ? (globalFlags|FLAG_HIDE_BULK) :
-				(globalFlags & ~(FLAG_HIDE_BULK|FLAG_DIGITAL));
-//		    setPoints();
+		if (n == 0) {
+		    model = models.get(ei.choice.getSelectedIndex());
+		    modelName = model.name;
+		    setLastModelName(modelName);
+		    setup();
 		    ei.newDialog = true;
-		}
-		if (n == 3) {
+		} else {
+		    int idx = 1;
+		    if (hasSwapDS() && n == idx++) {
 			flags = (ei.checkbox.getState()) ? (flags | FLAG_FLIP) :
-				(flags & ~FLAG_FLIP);
-//			setPoints();
-		}
-		if (n == 4 && !showBulk()) {
-		    globalFlags = (ei.checkbox.getState()) ? (globalFlags|FLAG_DIGITAL) :
-				(globalFlags & ~FLAG_DIGITAL);
-//		    setPoints();
-		}
-		if (n == 4 && showBulk()) {
-		    flags = ei.changeFlag(flags, FLAG_BODY_DIODE);
-		    ei.newDialog = true;
-		}
-		if (n == 5) {
-		    flags = ei.changeFlag(flags, FLAG_BODY_TERMINAL);
+				    (flags & ~FLAG_FLIP);
+		    } else if (n == idx) {
+			MosfetModel newModel = new MosfetModel(model);
+			EditDialog editDialog = new EditMosfetModelDialog(newModel, app, this);
+			CirSim.mosfetModelEditDialog = editDialog;
+			editDialog.show();
+			return;
+		    } else if (n == idx+1) {
+			if (model.readOnly) {
+			    Window.alert(Locale.LS("This model cannot be modified.  Change the model name to allow customization."));
+			    return;
+			}
+			EditDialog editDialog = new EditMosfetModelDialog(model, app, null);
+			CirSim.mosfetModelEditDialog = editDialog;
+			editDialog.show();
+			return;
+		    }
 		}
 
 		// lots of different cases where the body terminal might have gotten removed/added so just do this all the time
@@ -527,13 +798,25 @@ class MosfetElm extends CircuitElm {
 		setPoints();
 	}
 	double getCurrentIntoNode(int n) {
-	    if (n == 0)
-		return 0;
+	    if (n == 0) {
+		// gate current from cap currents (cap current flows out of gate)
+		double gateCur = 0;
+		if (model.capGS > 0 && geqGS > 0)
+		    gateCur -= geqGS * (volts[0] - volts[1]) + ceqGS;
+		if (model.capGD > 0 && geqGD > 0)
+		    gateCur -= geqGD * (volts[0] - volts[2]) + ceqGD;
+		return gateCur;
+	    }
 	    if (n == 3)
 		return -diodeCurrent1 - diodeCurrent2;
-	    if (n == 1)
-		return ids + diodeCurrent1;
-	    return -ids + diodeCurrent2;
+	    if (n == 1) {
+		double capCur = (model.capGS > 0 && geqGS > 0)
+		    ? geqGS * (volts[0] - volts[1]) + ceqGS : 0;
+		return ids + diodeCurrent1 + capCur;
+	    }
+	    double capCur = (model.capGD > 0 && geqGD > 0)
+		? geqGD * (volts[0] - volts[2]) + ceqGD : 0;
+	    return -ids + diodeCurrent2 + capCur;
 	}
 
         void flipX(int c2, int count) {

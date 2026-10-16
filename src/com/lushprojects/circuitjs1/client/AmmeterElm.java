@@ -22,6 +22,8 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
 class AmmeterElm extends CircuitElm {
@@ -53,8 +55,15 @@ class AmmeterElm extends CircuitElm {
             scale = Integer.parseInt(st.nextToken());
         } catch (Exception e) {}
     }
-    String dump() {
-            return super.dump() + " " + meter + " " + scale;
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "me", meter);
+	XMLSerializer.dumpAttr(elem, "sc", scale);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	meter = xml.parseIntAttr("me", meter);
+	scale = xml.parseIntAttr("sc", scale);
     }
     String getMeter(){
         switch (meter) {
@@ -154,14 +163,14 @@ class AmmeterElm extends CircuitElm {
             drawThickLine(g, point1, point2);
             g.fillPolygon(arrowPoly);
         } else {
-            g.setColor(needsHighlight() ? selectColor : lightGrayColor);
-            drawThickCircle(g, center.x, center.y, circleSize);
-            drawCenteredText(g, "A", center.x, center.y, true);
-
 	    calcLeads(circleSize*2);
 	    setVoltageColor(g, volts[0]);
 	    drawThickLine(g, point1, lead1);
 	    drawThickLine(g, lead2, point2);
+
+            g.setColor(needsHighlight() ? selectColor : lightGrayColor);
+            drawThickCircle(g, center.x, center.y, circleSize);
+            drawCenteredText(g, "A", center.x, center.y, true);
 
             g.setColor(whiteColor);
             g.setFont(unitsFont);
@@ -195,6 +204,10 @@ class AmmeterElm extends CircuitElm {
     final int circleSize = 12;
 
     int getDumpType() { return 370; }
+    void setVoltageSource(int n, VoltageSource v) {
+	super.setVoltageSource(n, v);
+	v.setNodes(nodes[0], nodes[1]);
+    }
     void stamp() {
         sim.stampVoltageSource(nodes[0], nodes[1], voltSource, 0);
     }

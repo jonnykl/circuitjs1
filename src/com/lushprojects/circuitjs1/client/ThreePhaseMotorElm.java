@@ -3,6 +3,8 @@ package com.lushprojects.circuitjs1.client;
 import com.google.gwt.i18n.client.NumberFormat;
 
 import com.lushprojects.circuitjs1.client.util.Locale;
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
 
 // based on https://ctms.engin.umich.edu/CTMS/index.php?example=MotorPosition&section=SystemModeling
 
@@ -30,7 +32,7 @@ class ThreePhaseMotorElm extends CircuitElm {
 	J = 1;
 	angle = pi/2; speed = filteredSpeed = 0;
 	b= 0.05;
-        voltSources = new int[2];
+        voltSources = new VoltageSource[2];
         curcounts = new double[3];
         coilCurrents = new double[coilCount];
     }
@@ -47,14 +49,30 @@ class ThreePhaseMotorElm extends CircuitElm {
 	try {
 	    J = new Double(st.nextToken()).doubleValue();
 	} catch (Exception e) { J = 1; }
-        voltSources = new int[2];
+        voltSources = new VoltageSource[2];
         curcounts = new double[3];
         coilCurrents = new double[coilCount];
     }
     int getDumpType() { return 427; }
-    String dump() {
-	// dump: inductance; resistance, K, Kb, J, b, gearRatio, tau
-	return super.dump() + " " +  Rs + " " + Rr + " " + Ls + " " +  Lr + " " + Lm + " " + b + " " + J;
+    void dumpXml(Document doc, Element elem) {
+	super.dumpXml(doc, elem);
+	XMLSerializer.dumpAttr(elem, "rs", Rs);
+	XMLSerializer.dumpAttr(elem, "rr", Rr);
+	XMLSerializer.dumpAttr(elem, "ls", Ls);
+	XMLSerializer.dumpAttr(elem, "lr", Lr);
+	XMLSerializer.dumpAttr(elem, "lm", Lm);
+	XMLSerializer.dumpAttr(elem, "b", b);
+	XMLSerializer.dumpAttr(elem, "j", J);
+    }
+    void undumpXml(XMLDeserializer xml) {
+	super.undumpXml(xml);
+	Rs = xml.parseDoubleAttr("rs", Rs);
+	Rr = xml.parseDoubleAttr("rr", Rr);
+	Ls = xml.parseDoubleAttr("ls", Ls);
+	Lr = xml.parseDoubleAttr("lr", Lr);
+	Lm = xml.parseDoubleAttr("lm", Lm);
+	b = xml.parseDoubleAttr("b", b);
+	J = xml.parseDoubleAttr("j", J);
     }
     public double getAngle(){ return(angle);}
 
@@ -103,19 +121,19 @@ class ThreePhaseMotorElm extends CircuitElm {
     void stamp() {
 	int i;
 	
-	int n001 = nodes[n001_ind];
-	int n002 = nodes[n002_ind];
-	int n003 = nodes[n003_ind];
-	int n004 = nodes[n004_ind];
-	int n005 = nodes[n005_ind];
-	int n006 = nodes[n006_ind];
-	int n007 = nodes[n007_ind];
+	CircuitNode n001 = nodes[n001_ind];
+	CircuitNode n002 = nodes[n002_ind];
+	CircuitNode n003 = nodes[n003_ind];
+	CircuitNode n004 = nodes[n004_ind];
+	CircuitNode n005 = nodes[n005_ind];
+	CircuitNode n006 = nodes[n006_ind];
+	CircuitNode n007 = nodes[n007_ind];
 
 	sim.stampResistor(nodes[0], n001, Rs);
 	sim.stampResistor(nodes[2], n003, Rs);
 	sim.stampResistor(nodes[4], n005, Rs);
-	sim.stampResistor(n004, 0, 1.5*Rr);
-	sim.stampResistor(n007, 0, 1.5*Rr);
+	sim.stampResistor(n004, CircuitNode.ground, 1.5*Rr);
+	sim.stampResistor(n007, CircuitNode.ground, 1.5*Rr);
 	
 	double Lr2 = Lr*1.5;
 	double coilInductances[] = { Ls, Ls, Ls, Lr2, Lr2 };
@@ -141,33 +159,36 @@ class ThreePhaseMotorElm extends CircuitElm {
             for (j = 0; j != i; j++)
                 xformMatrix[i][j] = xformMatrix[j][i] = couplingCoefs[i][j]*Math.sqrt(coilInductances[i]*coilInductances[j]);
 	
-        CirSim.invertMatrix(xformMatrix, coilCount);
+        SimulationManager.invertMatrix(xformMatrix, coilCount);
 
         double ts = sim.timeStep;
         for (i = 0; i != coilCount; i++)
             for (j = 0; j != coilCount; j++) {
                 // multiply in dt/2 (or dt for backward euler)
                 xformMatrix[i][j] *= ts;
-                int ni1 = coilNodes[i*2];
-                int nj1 = coilNodes[j*2];
-                int ni2 = coilNodes[i*2+1];
-                int nj2 = coilNodes[j*2+1];
+                int ni1_ind = coilNodes[i*2];
+                int nj1_ind = coilNodes[j*2];
+                int ni2_ind = coilNodes[i*2+1];
+                int nj2_ind = coilNodes[j*2+1];
                 if (i == j)
-                    sim.stampConductance(nodes[ni1], nodes[ni2], xformMatrix[i][i]);
+                    sim.stampConductance(nodes[ni1_ind], nodes[ni2_ind], xformMatrix[i][i]);
                 else
-                    sim.stampVCCurrentSource(nodes[ni1], nodes[ni2], nodes[nj1], nodes[nj2], xformMatrix[i][j]);
+                    sim.stampVCCurrentSource(nodes[ni1_ind], nodes[ni2_ind], nodes[nj1_ind], nodes[nj2_ind], xformMatrix[i][j]);
             }
         for (i = 0; i != 10; i++)
             sim.stampRightSide(nodes[coilNodes[i]]);
         
-        sim.stampVoltageSource(n002, 0, voltSources[0]);
-        sim.stampVoltageSource(n006, 0, voltSources[1]);
+        sim.stampVoltageSource(n002, CircuitNode.ground, voltSources[0]);
+        sim.stampVoltageSource(n006, CircuitNode.ground, voltSources[1]);
         
-        coilCurSourceValues = new double[coilCount];
-        coilCurrents = new double[coilCount];
-        
-        int nodeCount = getPostCount() + getInternalNodeCount();
-        nodeCurrents = new double[nodeCount];
+        if (coilCurSourceValues == null || coilCurSourceValues.length != coilCount)
+            coilCurSourceValues = new double[coilCount];
+        if (coilCurrents == null || coilCurrents.length != coilCount)
+            coilCurrents = new double[coilCount];
+
+        int nodeCount = getNodeCount();
+        if (nodeCurrents == null || nodeCurrents.length != nodeCount)
+            nodeCurrents = new double[nodeCount];
     }
     
     int coilNodes[] = { n001_ind, 1, n003_ind, 3, n005_ind, 5, n002_ind, n004_ind, n006_ind, n007_ind };
@@ -175,9 +196,15 @@ class ThreePhaseMotorElm extends CircuitElm {
     double coilCurSourceValues[];
     double xformMatrix[][];
     double nodeCurrents[];
-    int voltSources[];
+    VoltageSource voltSources[];
     
-    void setVoltageSource(int n, int v) { voltSources[n] = v; }
+    void setVoltageSource(int n, VoltageSource v) {
+	voltSources[n] = v;
+	if (n == 0)
+	    v.setNodes(nodes[n002_ind], CircuitNode.ground);
+	else
+	    v.setNodes(nodes[n006_ind], CircuitNode.ground);
+    }
     
     double vs1value, vs2value;
 
@@ -203,15 +230,15 @@ class ThreePhaseMotorElm extends CircuitElm {
             int n2 = coilNodes[i*2+1];
             sim.stampCurrentSource(nodes[n1], nodes[n2], coilCurSourceValues[i]);
         }
-	int n002 = nodes[n002_ind];
-	int n006 = nodes[n006_ind];
-        sim.updateVoltageSource(n002, 0, voltSources[0], -vs1value);
-        sim.updateVoltageSource(n006, 0, voltSources[1], -vs2value);
+	CircuitNode n002 = nodes[n002_ind];
+	CircuitNode n006 = nodes[n006_ind];
+        sim.updateVoltageSource(n002, CircuitNode.ground, voltSources[0], -vs1value);
+        sim.updateVoltageSource(n006, CircuitNode.ground, voltSources[1], -vs2value);
     }
     
     void calculateCurrent() {
         int i;
-        int nodeCount = getPostCount() + getInternalNodeCount();
+        int nodeCount = getNodeCount();
         if (nodeCurrents == null)
             return;
         for (i = 0; i != nodeCount; i++)

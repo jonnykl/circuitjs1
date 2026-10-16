@@ -19,15 +19,20 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Element;
+import com.google.gwt.xml.client.Document;
+import com.lushprojects.circuitjs1.client.util.Locale;
+
     class InductorElm extends CircuitElm {
 	Inductor ind;
 	double inductance;
 	double initialCurrent;
+	double saturationCurrent; // 0 = disabled (linear)
 	public InductorElm(int xx, int yy) {
 	    super(xx, yy);
 	    ind = new Inductor(sim);
 	    inductance = 1;
-	    ind.setup(inductance, current, flags);
+	    ind.setup(inductance, current, flags, saturationCurrent);
 	}
 	public InductorElm(int xa, int ya, int xb, int yb, int f,
 		    StringTokenizer st) {
@@ -37,13 +42,36 @@ package com.lushprojects.circuitjs1.client;
 	    current = new Double(st.nextToken()).doubleValue();
 	    try {
 		initialCurrent = new Double(st.nextToken()).doubleValue();
+		saturationCurrent = new Double(st.nextToken()).doubleValue();
 	    } catch (Exception e) {}
-	    ind.setup(inductance, current, flags);
+	    ind.setup(inductance, current, flags, saturationCurrent);
 	}
 	int getDumpType() { return 'l'; }
 	String dump() {
-	    return super.dump() + " " + inductance + " " + current + " " + initialCurrent;
+	    return super.dump() + " " + inductance + " " + current + " " + initialCurrent + " " + saturationCurrent;
 	}
+	
+        void dumpXml(Document doc, Element elem) {
+            super.dumpXml(doc, elem);
+            XMLSerializer.dumpAttr(elem, "l", inductance);
+            XMLSerializer.dumpAttr(elem, "ic", initialCurrent);
+            if (saturationCurrent != 0)
+                XMLSerializer.dumpAttr(elem, "isat", saturationCurrent);
+        }
+
+        void dumpXmlState(Document doc, Element elem) {
+            XMLSerializer.dumpAttr(elem, "i", current);
+        }
+
+        void undumpXml(XMLDeserializer xml) {
+            super.undumpXml(xml);
+            inductance = xml.parseDoubleAttr("l", inductance);
+            initialCurrent = xml.parseDoubleAttr("ic", initialCurrent);
+            current = xml.parseDoubleAttr("i", current);
+            saturationCurrent = xml.parseDoubleAttr("isat", saturationCurrent);
+	    ind.setup(inductance, current, flags, saturationCurrent);
+        }
+
 	void setPoints() {
 	    super.setPoints();
 	    calcLeads(32);
@@ -57,7 +85,7 @@ package com.lushprojects.circuitjs1.client;
 	    draw2Leads(g);
 	    setPowerColor(g, false);
 	    drawCoil(g, 8, lead1, lead2, v1, v2);
-	    if (sim.showValuesCheckItem.getState()) {
+	    if (showValues()) {
 		String s = getShortUnitText(inductance, "H");
 		drawValues(g, s, hs);
 	    }
@@ -83,14 +111,25 @@ package com.lushprojects.circuitjs1.client;
 	    ind.doStep(voltdiff);
 	}
 	void getInfo(String arr[]) {
-	    arr[0] = "inductor";
+	    arr[0] = (saturationCurrent > 0) ? "inductor (sat)" : "inductor";
 	    getBasicInfo(arr);
 	    arr[3] = "L = " + getUnitText(inductance, "H");
 	    arr[4] = "P = " + getUnitText(getPower(), "W");
+	    if (saturationCurrent > 0) {
+		double lEff = ind.calcEffectiveInductance(current);
+		arr[5] = "Leff = " + getUnitText(lEff, "H");
+		arr[6] = "Isat = " + getUnitText(saturationCurrent, "A");
+	    }
 	}
+
+        @Override
+        String getScopeText(int v) {
+            return Locale.LS("inductor") + ", " + getUnitText(inductance, "H");
+        }
+
 	public EditInfo getEditInfo(int n) {
 	    if (n == 0)
-		return new EditInfo("Inductance (H)", inductance, 1e-2, 10);
+		return new EditInfo("Inductance (H)", inductance, 1e-2, 10).setPositive();
 	    if (n == 1) {
 		EditInfo ei = new EditInfo("", 0, -1, -1);
 		ei.checkbox = new Checkbox("Trapezoidal Approximation",
@@ -99,11 +138,13 @@ package com.lushprojects.circuitjs1.client;
 	    }
             if (n == 2)
                 return new EditInfo("Initial Current (on Reset) (A)", initialCurrent);
+	    if (n == 3)
+		return new EditInfo("Saturation Current (A) (0=none)", saturationCurrent);
 	    return null;
 	}
-	
+
 	public void setEditValue(int n, EditInfo ei) {
-	    if (n == 0 && ei.value > 0)
+	    if (n == 0)
 		inductance = ei.value;
 	    if (n == 1) {
 		if (ei.checkbox.getState())
@@ -113,13 +154,30 @@ package com.lushprojects.circuitjs1.client;
 	    }
             if (n == 2)
                 initialCurrent = ei.value;
-	    ind.setup(inductance, current, flags);
+	    if (n == 3) {
+		if (ei.value >= 0)
+		    saturationCurrent = ei.value;
+		else
+		    ei.setError("must be >= 0");
+	    }
+	    ind.setup(inductance, current, flags, saturationCurrent);
 	}
 	
 	int getShortcut() { return 'L'; }
 	public double getInductance() { return inductance; }
 	void setInductance(double l) {
 	    inductance = l;
-	    ind.setup(inductance, current, flags);
+	    ind.setup(inductance, current, flags, saturationCurrent);
+	}
+	void setSaturationCurrent(double isat) {
+	    saturationCurrent = isat;
+	    ind.setup(inductance, current, flags, saturationCurrent);
+	}
+	double getSaturationCurrent() { return saturationCurrent; }
+	boolean validate() {
+	    FindPathInfo fpi = new FindPathInfo(FindPathInfo.INDUCT, this, getNode(1), sim);
+	    if (!fpi.findPath(getNode(0)))
+		reset();
+	    return true;
 	}
     }

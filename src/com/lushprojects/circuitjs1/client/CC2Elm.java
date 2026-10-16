@@ -19,6 +19,9 @@
 
 package com.lushprojects.circuitjs1.client;
 
+import com.google.gwt.xml.client.Document;
+import com.google.gwt.xml.client.Element;
+
     class CC2Elm extends ChipElm {
 	double gain;
 	public CC2Elm(int xx, int yy) { super(xx, yy); gain = 1; }
@@ -28,8 +31,13 @@ package com.lushprojects.circuitjs1.client;
 	    super(xa, ya, xb, yb, f, st);
 	    gain = new Double(st.nextToken()).doubleValue();
 	}
-	String dump() {
-	    return super.dump() + " " + gain;
+	void dumpXml(Document doc, Element elem) {
+	    super.dumpXml(doc, elem);
+	    XMLSerializer.dumpAttr(elem, "ga", gain);
+	}
+	void undumpXml(XMLDeserializer xml) {
+	    super.undumpXml(xml);
+	    gain = xml.parseDoubleAttr("ga", gain);
 	}
 	String getChipName() { return "CC2"; }
 	void setupPins() {
@@ -41,6 +49,7 @@ package com.lushprojects.circuitjs1.client;
 	    pins[1] = new Pin(2, SIDE_W, "Y");
 	    pins[2] = new Pin(1, SIDE_E, "Z");
 	}
+	String getElmType() { return "CCII"; }
 	void getInfo(String arr[]) {
 	    arr[0] = (gain == 1) ? "CCII+~" : "CCII-~"; // ~ is for localization
 	    arr[1] = "X,Y = " + getVoltageText(volts[0]);
@@ -51,10 +60,10 @@ package com.lushprojects.circuitjs1.client;
 	@Override boolean isDigitalChip() { return false; }
 	void stamp() {
 	    // X voltage = Y voltage
-	    sim.stampVoltageSource(0, nodes[0], pins[0].voltSource);
-	    sim.stampVCVS(0, nodes[1], 1, pins[0].voltSource);
+	    sim.stampVoltageSource(CircuitNode.ground, nodes[0], pins[0].voltSource);
+	    sim.stampVCVS(CircuitNode.ground, nodes[1], 1, pins[0].voltSource);
 	    // Z current = gain * X current
-	    sim.stampCCCS(0, nodes[2], pins[0].voltSource, gain);
+	    sim.stampCCCS(CircuitNode.ground, nodes[2], pins[0].voltSource, gain);
 	}
 	void calculateCurrent() {
 	    super.calculateCurrent();
@@ -66,6 +75,7 @@ package com.lushprojects.circuitjs1.client;
 	int getPostCount() { return 3; }
 	int getVoltageSourceCount() { return 1; }
 	int getDumpType() { return 179; }
+	boolean getMatrixConnection(int n1, int n2) { return true; }
     }
 
 class CC2NegElm extends CC2Elm {
