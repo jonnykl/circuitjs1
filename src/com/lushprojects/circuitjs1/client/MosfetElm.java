@@ -365,7 +365,7 @@ class MosfetElm extends CircuitElm implements MouseWheelHandler {
 		(n == 2) ? drn[0] : body[0];
 	}
 	
-	double getCurrent() { return ids; }
+	double getCurrent() { return pnp*ids; }
 	double getPower() {
 	    return ids*(volts[2]-volts[1]) - diodeCurrent1*(volts[1]-volts[bodyTerminal]) - diodeCurrent2*(volts[2]-volts[bodyTerminal]);
 	    }
