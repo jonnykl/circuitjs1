@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with CircuitJS1.  If not, see <http://www.gnu.org/licenses/>.
     
-    AmmeterElm by Bill Collis
+    AmpmeterElm by Bill Collis
     
 */
 
@@ -26,7 +26,7 @@ import com.google.gwt.xml.client.Document;
 import com.google.gwt.xml.client.Element;
 import com.lushprojects.circuitjs1.client.util.Locale;
 
-class AmmeterElm extends CircuitElm {
+class AmpmeterElm extends CircuitElm {
         
         int meter;
 	int scale;
@@ -41,12 +41,12 @@ class AmmeterElm extends CircuitElm {
         double currents[];
         boolean increasingI=true, decreasingI=true;
 
-    public AmmeterElm(int xx, int yy) { 
+    public AmpmeterElm(int xx, int yy) { 
         super(xx, yy); 
         flags = FLAG_SHOWCURRENT|FLAG_CIRCLE;
         scale = SCALE_AUTO;
     }
-    public AmmeterElm(int xa, int ya, int xb, int yb, int f,
+    public AmpmeterElm(int xa, int ya, int xb, int yb, int f,
                StringTokenizer st) {
         super(xa, ya, xb, yb, f);
         scale = SCALE_AUTO;
@@ -216,7 +216,7 @@ class AmmeterElm extends CircuitElm {
     }
     int getVoltageSourceCount() { return 1; }
     void getInfo(String arr[]) {
-        arr[0] = "Ammeter";
+        arr[0] = "Ampmeter";
         switch (meter) {
             case AM_VOL:
                 arr[1] = "I = " + getUnitText(current, "A");

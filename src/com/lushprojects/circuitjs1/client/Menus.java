@@ -341,7 +341,7 @@ public class Menus {
 		"Add Labeled Node", "LabeledNodeElm",
 		"Add Voltmeter/Scope Probe", "ProbeElm",
 		"Add Ohmmeter", "OhmMeterElm",
-		"Add Ammeter", "AmmeterElm",
+		"Add Ampmeter", "AmpmeterElm",
 		"Add Wattmeter", "WattmeterTrueElm",
 		"Add Test Point", "TestPointElm",
 		"Add Decimal Display", "DecimalDisplayElm",
